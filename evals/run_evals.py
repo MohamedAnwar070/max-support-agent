@@ -1,11 +1,13 @@
 import argparse
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 import sys
 import time
 from typing import Any, Dict, List
 
+os.environ.setdefault("URBANTHREAD_SQLITE_DB", ":memory:")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.agent import CustomerSupportAgent
@@ -14,6 +16,7 @@ from src.constants import BRAND_NAME, DEFAULT_BACKEND
 
 def evaluate_single_case(agent: CustomerSupportAgent, case: Dict[str, Any]) -> Dict[str, Any]:
     agent.store.reset()
+    agent.reset_session()
     agent.store.simulate_db_failure = bool(case.get("simulate_db_failure", False))
 
     start_ts = time.perf_counter()
@@ -175,17 +178,18 @@ def main() -> None:
     parser.add_argument(
         "--live-llm",
         action="store_true",
-        help="Enable live LLM response generation via OpenAI API or Claude Code Pro CLI",
+        help="Evaluate the LLM-driven agent (OpenAI API or Claude Code CLI); writes *_llm_agent reports",
     )
     args = parser.parse_args()
 
     evals_dir = Path(__file__).resolve().parent
     dataset_path = evals_dir / "eval_dataset.json"
-    results_json_path = evals_dir / "results.json"
-    report_md_path = evals_dir / "EVAL_REPORT.md"
-
     cases: List[Dict[str, Any]] = json.loads(dataset_path.read_text(encoding="utf-8"))
     agent = CustomerSupportAgent(backend=args.backend, use_live_llm=args.live_llm)
+    # LLM-driven runs get their own report files so the deterministic baseline is kept.
+    suffix = "_llm_agent" if agent.llm_backend is not None else ""
+    results_json_path = evals_dir / f"results{suffix}.json"
+    report_md_path = evals_dir / f"EVAL_REPORT{suffix.upper()}.md"
 
     results: List[Dict[str, Any]] = []
     print("=" * 78)

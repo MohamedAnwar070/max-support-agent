@@ -1,6 +1,6 @@
 # The core agent, test suite, and repeatable eval runner are built with zero mandatory
 # third-party runtime dependencies (runs out-of-the-box on Python 3.10+ standard library).
-# Optional packages for extended developer workflows:
-openai>=1.40.0
+# The OpenAI backend uses urllib directly; the Claude backend shells out to the `claude` CLI.
+# Optional, for running the tests with pytest instead of unittest:
 pytest>=8.0.0
 

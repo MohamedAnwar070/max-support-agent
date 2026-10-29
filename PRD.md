@@ -47,8 +47,11 @@ UrbanThread is a fictional direct-to-consumer apparel company offering everyday 
    - Every mock refund / return / cancellation is recorded with a **unique `request_key`** in `idempotency_ledger` inside an ACID transaction.
 3. **Centralized Constants & `.env` Configuration (`src/constants.py`, `src/config.py`):**
    - All constants, prompts, regexes, SQLite schemas, and status codes are centralized in `src/constants.py`, with `.env` configuration managed in `src/config.py`.
-4. **Multi-Backend LLM Support (`src/llm_backends.py`):**
-   - Supports **Claude Code Pro CLI** (`claude -p`), **OpenAI API** (`OPENAI_API_KEY`), and a **Hybrid Deterministic Mode** for instant offline test/eval reproducibility.
+4. **LLM-Driven Agent with Deterministic Guarantees (`src/llm_agent.py`, `src/llm_backends.py`):**
+   - The LLM (Claude via the Claude Code CLI, or OpenAI) plans each turn and chooses which tools to call.
+   - Safety-critical rules are enforced in code, not left to the model: a tool policy gate (identifiers must come from the customer, mutations only on explicit request), checks inside the tools (ownership, eligibility, conflicts, idempotency), and an output validator (decision derived from tool results, mandatory escalations, no invented IDs or false success claims, PII scrubbing).
+   - A deterministic engine provides offline reproducibility and is the automatic fallback.
+5. **Identity Assumption:** a customer is verified by Order ID + the email on that order. Email alone is never sufficient, unverified customers never see another customer's PII, and 3 failed verifications lock the session.
 
 ---
 

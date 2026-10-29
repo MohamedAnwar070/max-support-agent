@@ -417,23 +417,23 @@ class DataStore:
         ).fetchone()
         return self._hydrate_order(row) if row else None
 
-    def get_idempotency_record(
-        self,
-        idempotency_key: str,
-        request_key: Optional[str] = None,
-    ) -> Optional[Dict[str, Any]]:
+    def get_idempotency_record(self, idempotency_key: str) -> Optional[Dict[str, Any]]:
+        """Ledger lookup scoped to one order + action, so a record is only ever returned to its own order."""
         self.check_health()
-        if request_key:
-            row = self.conn.execute(
-                "SELECT * FROM idempotency_ledger WHERE idempotency_key = ? OR UPPER(request_key) = ?",
-                (idempotency_key, request_key.strip().upper()),
-            ).fetchone()
-        else:
-            row = self.conn.execute(
-                "SELECT * FROM idempotency_ledger WHERE idempotency_key = ?",
-                (idempotency_key,),
-            ).fetchone()
+        row = self.conn.execute(
+            "SELECT * FROM idempotency_ledger WHERE idempotency_key = ?",
+            (idempotency_key,),
+        ).fetchone()
         return dict(row) if row else None
+
+    def request_key_owned_elsewhere(self, request_key: str, idempotency_key: str) -> bool:
+        """True when a request_key is already bound to a different order/action (key reuse or tampering)."""
+        self.check_health()
+        row = self.conn.execute(
+            "SELECT 1 FROM idempotency_ledger WHERE UPPER(request_key) = ? AND idempotency_key != ?",
+            (request_key.strip().upper(), idempotency_key),
+        ).fetchone()
+        return row is not None
 
     def record_return(
         self,

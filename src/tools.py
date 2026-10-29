@@ -1,10 +1,11 @@
-from typing import Any, Dict, List, Optional
+import inspect
+from typing import Any, Dict, List, Optional, Set
 
 from .constants import (
     CODE_CONFLICT_VIP_FINAL_SALE,
     CODE_DUPLICATE,
     CODE_MISSING_PARAMS,
-    CODE_ORDER_NOT_FOUND,
+    CODE_REQUEST_KEY_MISMATCH,
     CODE_TOOL_ERROR,
     CODE_UNAUTHORIZED,
     STANDARD_RETURN_WINDOW_DAYS,
@@ -17,6 +18,7 @@ from .constants import (
     STATUS_SUCCESS,
     VIP_GOLD_RETURN_WINDOW_DAYS,
     VIP_GOLD_TIER,
+    VERIFICATION_FAILED_MESSAGE,
 )
 from .data_store import DataStore, ToolExecutionError
 from .models import EscalationTicket, ToolCallRecord
@@ -27,6 +29,8 @@ class SupportToolkit:
         self.store = store
         self.call_history: List[ToolCallRecord] = []
         self.last_escalation: Optional[EscalationTicket] = None
+        # Emails that passed an order-ownership check; only these may see customer PII in replies.
+        self.verified_emails: Set[str] = set()
 
     def clear_turn_history(self) -> None:
         self.call_history = []
@@ -45,7 +49,24 @@ class SupportToolkit:
             self.call_history.append(ToolCallRecord(tool_name, arguments, STATUS_ERROR, res))
             return res
 
-        return dispatch_map[tool_name](**arguments)
+        handler = dispatch_map[tool_name]
+        allowed = set(inspect.signature(handler).parameters)
+        clean_args = {k: v for k, v in (arguments or {}).items() if k in allowed}
+        try:
+            return handler(**clean_args)
+        except TypeError as exc:
+            res = {"status": STATUS_ERROR, "code": "INVALID_ARGUMENTS", "message": str(exc)}
+            self.call_history.append(ToolCallRecord(tool_name, clean_args, STATUS_ERROR, res))
+            return res
+
+    def _verification_failed(self, tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
+        res = {"status": STATUS_BLOCKED, "code": CODE_UNAUTHORIZED, "message": VERIFICATION_FAILED_MESSAGE}
+        self.call_history.append(ToolCallRecord(tool_name, args, STATUS_BLOCKED, res))
+        return res
+
+    @staticmethod
+    def _owns(order: Optional[Dict[str, Any]], customer_email: str) -> bool:
+        return bool(order) and order["customer_email"].strip().lower() == customer_email.strip().lower()
 
     def lookup_products(self, query: str = "") -> Dict[str, Any]:
         try:
@@ -108,27 +129,10 @@ class SupportToolkit:
             self.call_history.append(ToolCallRecord("get_order_status", args, STATUS_ERROR, res))
             return res
 
-        if order is None:
-            res = {
-                "status": STATUS_ERROR,
-                "code": CODE_ORDER_NOT_FOUND,
-                "message": f"No order found matching ID '{order_id}'.",
-            }
-            self.call_history.append(ToolCallRecord("get_order_status", args, STATUS_ERROR, res))
-            return res
+        if not self._owns(order, customer_email):
+            return self._verification_failed("get_order_status", args)
 
-        if order["customer_email"].strip().lower() != customer_email.strip().lower():
-            res = {
-                "status": STATUS_BLOCKED,
-                "code": CODE_UNAUTHORIZED,
-                "message": (
-                    f"Access denied: Customer email '{customer_email}' does not match the owner on record "
-                    f"for order '{order_id}'."
-                ),
-            }
-            self.call_history.append(ToolCallRecord("get_order_status", args, STATUS_BLOCKED, res))
-            return res
-
+        self.verified_emails.add(customer_email.strip().lower())
         res = {
             "status": STATUS_SUCCESS,
             "order": order,
@@ -187,26 +191,34 @@ class SupportToolkit:
             self.call_history.append(ToolCallRecord("process_return_or_cancel", args, STATUS_ERROR, res))
             return res
 
-        if order is None:
+        if not self._owns(order, customer_email):
+            return self._verification_failed("process_return_or_cancel", args)
+
+        self.verified_emails.add(customer_email.strip().lower())
+
+        idempotency_key = f"{order['order_id'].upper()}:{norm_action}"
+        try:
+            existing = self.store.get_idempotency_record(idempotency_key)
+            key_taken = not existing and self.store.request_key_owned_elsewhere(effective_request_key, idempotency_key)
+        except ToolExecutionError as exc:
             res = {
                 "status": STATUS_ERROR,
-                "code": CODE_ORDER_NOT_FOUND,
-                "message": f"Order '{order_id}' was not found.",
+                "code": CODE_TOOL_ERROR,
+                "message": str(exc),
+                "required_action": "Report that the action could not be verified and do not claim success. Escalate via escalate_to_human.",
             }
             self.call_history.append(ToolCallRecord("process_return_or_cancel", args, STATUS_ERROR, res))
             return res
 
-        if order["customer_email"].strip().lower() != customer_email.strip().lower():
+        if key_taken:
             res = {
                 "status": STATUS_BLOCKED,
-                "code": CODE_UNAUTHORIZED,
-                "message": f"Security Block: '{customer_email}' is not authorized to access order '{order_id}'.",
+                "code": CODE_REQUEST_KEY_MISMATCH,
+                "message": "The supplied request key does not belong to this order and action. No action was taken.",
             }
             self.call_history.append(ToolCallRecord("process_return_or_cancel", args, STATUS_BLOCKED, res))
             return res
 
-        idempotency_key = f"{order['order_id'].upper()}:{norm_action}"
-        existing = self.store.get_idempotency_record(idempotency_key, effective_request_key)
         if existing:
             res = {
                 "status": STATUS_DUPLICATE,
@@ -230,6 +242,26 @@ class SupportToolkit:
             has_final_sale = any(item.get("final_sale", False) for item in order.get("items", []))
             is_vip_gold = order.get("loyalty_tier") == VIP_GOLD_TIER
 
+            if order["status"] != "delivered":
+                res = {
+                    "status": STATUS_DENIED,
+                    "code": "ORDER_NOT_DELIVERED",
+                    "message": f"Order {order['order_id']} is currently '{order['status']}'. Returns require delivery first.",
+                }
+                self.call_history.append(ToolCallRecord("process_return_or_cancel", args, STATUS_DENIED, res))
+                return res
+
+            max_days = VIP_GOLD_RETURN_WINDOW_DAYS if is_vip_gold else STANDARD_RETURN_WINDOW_DAYS
+            days_elapsed = order.get("days_since_delivery") or 0
+            if days_elapsed > max_days:
+                res = {
+                    "status": STATUS_DENIED,
+                    "code": "RETURN_WINDOW_EXPIRED",
+                    "message": f"Order was delivered {days_elapsed} days ago, exceeding the {max_days}-day return policy window.",
+                }
+                self.call_history.append(ToolCallRecord("process_return_or_cancel", args, STATUS_DENIED, res))
+                return res
+
             if has_final_sale and is_vip_gold:
                 res = {
                     "status": STATUS_CONFLICT,
@@ -247,32 +279,12 @@ class SupportToolkit:
                 self.call_history.append(ToolCallRecord("process_return_or_cancel", args, STATUS_CONFLICT, res))
                 return res
 
-            if has_final_sale and not is_vip_gold:
+            if has_final_sale:
                 res = {
                     "status": STATUS_DENIED,
                     "code": "FINAL_SALE_NON_RETURNABLE",
                     "policy_id": "POL-RET-02",
                     "message": "This order contains a Final Sale item, which is non-returnable under Policy POL-RET-02.",
-                }
-                self.call_history.append(ToolCallRecord("process_return_or_cancel", args, STATUS_DENIED, res))
-                return res
-
-            if order["status"] != "delivered":
-                res = {
-                    "status": STATUS_DENIED,
-                    "code": "ORDER_NOT_DELIVERED",
-                    "message": f"Order {order['order_id']} is currently '{order['status']}'. Returns require delivery first.",
-                }
-                self.call_history.append(ToolCallRecord("process_return_or_cancel", args, STATUS_DENIED, res))
-                return res
-
-            max_days = VIP_GOLD_RETURN_WINDOW_DAYS if is_vip_gold else STANDARD_RETURN_WINDOW_DAYS
-            days_elapsed = order.get("days_since_delivery") or 0
-            if days_elapsed > max_days:
-                res = {
-                    "status": STATUS_DENIED,
-                    "code": "RETURN_WINDOW_EXPIRED",
-                    "message": f"Order was delivered {days_elapsed} days ago, exceeding the {max_days}-day return policy window.",
                 }
                 self.call_history.append(ToolCallRecord("process_return_or_cancel", args, STATUS_DENIED, res))
                 return res

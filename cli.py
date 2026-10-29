@@ -150,7 +150,7 @@ def main() -> None:
     parser.add_argument(
         "--live-llm",
         action="store_true",
-        help="Use live OpenAI API or Claude Code Pro CLI to synthesize responses",
+        help="Let a live LLM (OpenAI API or Claude Code CLI) plan and call tools, behind the policy gate",
     )
     parser.add_argument(
         "--demo",
