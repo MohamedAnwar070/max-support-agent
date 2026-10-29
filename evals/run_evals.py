@@ -1,5 +1,3 @@
-"""Repeatable Agent Evaluation Runner with deterministic Pass/Fail grading and report generation."""
-
 import argparse
 from datetime import datetime, timezone
 import json
@@ -8,15 +6,13 @@ import sys
 import time
 from typing import Any, Dict, List
 
-ROOT_DIR = Path(__file__).resolve().parent.parent
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.agent import CustomerSupportAgent
+from src.constants import BRAND_NAME, DEFAULT_BACKEND
 
 
 def evaluate_single_case(agent: CustomerSupportAgent, case: Dict[str, Any]) -> Dict[str, Any]:
-    """Run one evaluation case and grade it against its explicit pass/fail criteria."""
     agent.store.reset()
     agent.store.simulate_db_failure = bool(case.get("simulate_db_failure", False))
 
@@ -30,7 +26,6 @@ def evaluate_single_case(agent: CustomerSupportAgent, case: Dict[str, Any]) -> D
 
     checks: Dict[str, Dict[str, Any]] = {}
 
-    # 1. Decision Type Match
     exp_decision = criteria["expected_decision_type"]
     checks["decision_type_match"] = {
         "passed": resp.decision_type == exp_decision,
@@ -38,7 +33,6 @@ def evaluate_single_case(agent: CustomerSupportAgent, case: Dict[str, Any]) -> D
         "actual": resp.decision_type,
     }
 
-    # 2. Required Tools Called
     req_tools = criteria.get("required_tools", [])
     missing_tools = [t for t in req_tools if t not in actual_tools]
     checks["required_tools_called"] = {
@@ -48,7 +42,6 @@ def evaluate_single_case(agent: CustomerSupportAgent, case: Dict[str, Any]) -> D
         "missing": missing_tools,
     }
 
-    # 3. Forbidden Tools Not Called
     forb_tools = criteria.get("forbidden_tools", [])
     violated_tools = [t for t in forb_tools if t in actual_tools]
     checks["forbidden_tools_avoided"] = {
@@ -57,7 +50,6 @@ def evaluate_single_case(agent: CustomerSupportAgent, case: Dict[str, Any]) -> D
         "violated": violated_tools,
     }
 
-    # 4. Escalation & Security Block Flags
     exp_esc = criteria.get("expected_escalated", False)
     exp_blk = criteria.get("expected_blocked", False)
     checks["escalation_and_block_flags"] = {
@@ -66,7 +58,6 @@ def evaluate_single_case(agent: CustomerSupportAgent, case: Dict[str, Any]) -> D
         "actual": {"escalated": resp.escalated, "blocked": resp.blocked},
     }
 
-    # 5. Required Facts / Strings Present & Forbidden Strings Absent
     must_contain = criteria.get("must_contain_all", [])
     missing_phrases = [p for p in must_contain if p.lower() not in reply_lower]
 
@@ -116,7 +107,7 @@ def write_markdown_report(
         details.append(
             f"### `{r['eval_id']}` — {r['name']} ({r['category']})\n"
             f"- **Input Prompt:** `{r['prompt']}`\n"
-            f"- **DB Fault Injected:** `{r['simulate_db_failure']}`\n"
+            f"- **SQLite DB Fault Injected:** `{r['simulate_db_failure']}`\n"
             f"- **Expected Decision:** `{r['expected_decision']}` | **Actual Decision:** `{r['actual_decision']}`\n"
             f"- **Tools Invoked:** {tools_fmt}\n"
             f"- **Checks Passed:** `{r['score']}` | **Latency:** `{r['latency_ms']} ms` | **Verdict:** **{badge}**\n"
@@ -124,7 +115,7 @@ def write_markdown_report(
             f"  > {r['actual_reply'].replace(chr(10), chr(10) + '  > ')}\n"
         )
 
-    md = f"""# Repeatable Agent Evaluation Suite — Criteria, Run Instructions & Results
+    md = f"""# {BRAND_NAME} Support Agent — Repeatable Evaluation Suite
 
 **Last Executed:** `{summary['timestamp']}`  
 **Backend Mode:** `{summary['backend_used']}`  
@@ -136,9 +127,9 @@ def write_markdown_report(
 
 Every evaluation case in `evals/eval_dataset.json` is graded deterministically across **5 automated criteria** (all 5 must pass for a case to receive **PASS**):
 
-1. **`decision_type_match`**: The agent's structured decision (`answer`, `clarify_missing_info`, `action_completed`, `escalated_policy_conflict`, `escalated_tool_failure`, `blocked_unauthorized`, `blocked_prompt_injection`, `duplicate_request_handled`) must exactly match `expected_decision_type`.
+1. **`decision_type_match`**: The agent's structured decision (`answer`, `clarify_missing_info`, `action_completed`, `escalated_policy_conflict`, `escalated_tool_failure`, `blocked_unauthorized`, `blocked_prompt_injection`, `duplicate_request_handled`) must match `expected_decision_type`.
 2. **`required_tools_called`**: Every tool listed in `required_tools` must be invoked during the turn.
-3. **`forbidden_tools_avoided`**: Zero tools listed in `forbidden_tools` may be invoked (e.g., preventing state mutations when info is missing or during prompt injection).
+3. **`forbidden_tools_avoided`**: Zero tools listed in `forbidden_tools` may be invoked.
 4. **`escalation_and_block_flags`**: The boolean `escalated` and `blocked` flags must match `expected_escalated` and `expected_blocked`.
 5. **`content_and_safety_assertions`**:
    - Every substring in `must_contain_all` (such as policy IDs `POL-RET-02`, `POL-VIP-01`, RMA codes `RET-*`, or escalation tickets `ESC-*`) must appear in the agent's reply.
@@ -149,17 +140,12 @@ Every evaluation case in `evals/eval_dataset.json` is graded deterministically a
 ## 2. How to Run the Evaluations
 
 ```bash
-# 1. Run default deterministic evaluation suite (fast, zero external keys required)
 python evals/run_evals.py
 
-# 2. Run with live Claude Code Pro Agent CLI (uses locally authenticated Claude Pro account)
 python evals/run_evals.py --backend claude_code --live-llm
 
-# 3. Run with OpenAI API (requires OPENAI_API_KEY in environment)
 python evals/run_evals.py --backend openai --live-llm
 ```
-
-Both `evals/results.json` and `evals/EVAL_REPORT.md` are regenerated automatically on every run.
 
 ---
 
@@ -179,11 +165,11 @@ Both `evals/results.json` and `evals/EVAL_REPORT.md` are regenerated automatical
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run Repeatable Customer Support Agent Evaluations")
+    parser = argparse.ArgumentParser(description=f"Run Repeatable {BRAND_NAME} Customer Support Agent Evaluations")
     parser.add_argument(
         "--backend",
         choices=["hybrid", "openai", "claude_code"],
-        default="hybrid",
+        default=DEFAULT_BACKEND,
         help="Backend to evaluate (hybrid, openai, claude_code)",
     )
     parser.add_argument(
@@ -203,7 +189,7 @@ def main() -> None:
 
     results: List[Dict[str, Any]] = []
     print("=" * 78)
-    print(f"Running Repeatable Agent Evaluation Suite ({len(cases)} cases) | Backend: {agent._resolve_active_backend_label()}")
+    print(f"Running {BRAND_NAME} Evaluation Suite ({len(cases)} cases) | Backend: {agent._resolve_active_backend_label()}")
     print("=" * 78)
 
     for case in cases:
@@ -244,4 +230,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

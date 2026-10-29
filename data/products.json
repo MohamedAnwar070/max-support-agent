@@ -1,74 +1,73 @@
 [
   {
     "product_id": "PROD-001",
-    "name": "CloudKnit Merino Hoodie",
-    "category": "Tops & Hoodies",
+    "name": "Sunnystep CloudKnit Merino Hoodie",
+    "category": "Apparel / Tops",
     "price": 118.00,
     "currency": "USD",
     "sizes_in_stock": ["S", "M", "L", "XL"],
     "sizes_out_of_stock": ["XS"],
-    "fit_guide": "True to size with a relaxed drape. Take your normal size.",
+    "fit_guide": "True to size with a relaxed movement drape. Take your normal size.",
     "fabric_and_care": "100% Australian Extra-Fine Merino Wool. Machine wash cold on gentle wool cycle, lay flat to dry. Do not tumble dry.",
     "final_sale": false,
     "clearance": false,
-    "description": "Ultra-soft breathable merino wool hoodie designed for year-round temperature regulation."
+    "description": "Breathable temperature-regulating merino wool hoodie engineered for all-day comfort and travel."
   },
   {
     "product_id": "PROD-002",
-    "name": "AeroStride Carbon Running Jacket",
-    "category": "Outerwear",
+    "name": "Sunnystep AeroStride Weather Jacket",
+    "category": "Apparel / Outerwear",
     "price": 165.00,
     "currency": "USD",
     "sizes_in_stock": ["M", "L"],
     "sizes_out_of_stock": ["XS", "S", "XL"],
-    "fit_guide": "Athletic slim fit. If you plan to wear a mid-layer or hoodie underneath, size up one size.",
-    "fabric_and_care": "Recycled Ripstop Nylon with PFC-free DWR water-repellent finish. Machine wash cold, hang dry.",
+    "fit_guide": "Athletic tailored fit. Size up one size if layering over a heavy hoodie.",
+    "fabric_and_care": "Recycled Ripstop Nylon with PFC-free water-repellent finish. Machine wash cold, hang dry.",
     "final_sale": false,
     "clearance": false,
-    "description": "Windproof, water-resistant packable running shell with 360-degree reflective trim."
+    "description": "Lightweight windproof and water-resistant commuter shell with 360-degree reflective detailing."
   },
   {
     "product_id": "PROD-003",
-    "name": "Archive Velvet Evening Blazer (Final Sale)",
+    "name": "Sunnystep Archive Velvet Blazer (Final Sale)",
     "category": "Clearance / Outerwear",
     "price": 89.00,
     "original_price": 220.00,
     "currency": "USD",
     "sizes_in_stock": ["S", "M"],
     "sizes_out_of_stock": ["L", "XL"],
-    "fit_guide": "Tailored structured fit through chest and shoulders.",
+    "fit_guide": "Structured ergonomic shoulder fit.",
     "fabric_and_care": "Cotton-silk blend velvet. Dry clean only.",
     "final_sale": true,
     "clearance": true,
-    "description": "Limited archive release tailored velvet blazer sold at deep clearance discount. Marked Final Sale."
+    "description": "Limited archive release tailored blazer offered at deep clearance discount. Marked Final Sale."
   },
   {
     "product_id": "PROD-004",
-    "name": "FlexCore Seamless High-Rise Leggings",
+    "name": "Sunnystep FlexCore Movement Leggings",
     "category": "Activewear / Bottoms",
     "price": 74.00,
     "currency": "USD",
     "sizes_in_stock": ["XS", "S", "M", "L"],
     "sizes_out_of_stock": [],
-    "fit_guide": "Compressive second-skin fit. High-rise waistband stays put during high-impact workouts.",
+    "fit_guide": "Supportive second-skin high-rise fit.",
     "fabric_and_care": "78% Recycled Polyamide, 22% Elastane. Wash cold inside-out, air dry.",
     "final_sale": false,
     "clearance": false,
-    "description": "Moisture-wicking 4-way stretch leggings with chafe-free seamless construction."
+    "description": "Four-way stretch seamless movement leggings with contoured waistband support."
   },
   {
     "product_id": "PROD-005",
-    "name": "Artisan 14oz Raw Selvedge Denim Jeans",
-    "category": "Bottoms / Denim",
+    "name": "Sunnystep Balance Runner Knit Shoes",
+    "category": "Footwear / Walking Shoes",
     "price": 145.00,
     "currency": "USD",
-    "sizes_in_stock": ["30", "32", "34"],
-    "sizes_out_of_stock": ["28", "36"],
-    "fit_guide": "Straight tapered fit. Note: Unwashed raw sanforized denim will shrink approximately 3-5% in waist and length after first cold soak.",
-    "fabric_and_care": "100% Japanese Selvedge Cotton. Spot clean or hand soak in cold water inside out; hang dry.",
+    "sizes_in_stock": ["38", "39", "40", "41", "42"],
+    "sizes_out_of_stock": ["36", "37", "43"],
+    "fit_guide": "Wide toe-box ergonomic fit with structured acupressure arch support insole. True to EU sizing.",
+    "fabric_and_care": "Water-resistant engineered knit upper with removable gel-cushioned insole. Wipe clean with a damp cloth; air dry.",
     "final_sale": false,
     "clearance": false,
-    "description": "Heritage shuttle-loomed raw indigo selvedge denim that molds to your body over time."
+    "description": "Signature Sunnystep ergonomic walking shoe designed to reduce foot fatigue and joint stress."
   }
 ]
-

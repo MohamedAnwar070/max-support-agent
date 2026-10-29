@@ -15,7 +15,7 @@
     "items": [
       {
         "product_id": "PROD-003",
-        "name": "Archive Velvet Evening Blazer (Final Sale)",
+        "name": "Sunnystep Archive Velvet Blazer (Final Sale)",
         "size": "M",
         "quantity": 1,
         "unit_price": 89.00,
@@ -42,7 +42,7 @@
     "items": [
       {
         "product_id": "PROD-001",
-        "name": "CloudKnit Merino Hoodie",
+        "name": "Sunnystep CloudKnit Merino Hoodie",
         "size": "L",
         "quantity": 1,
         "unit_price": 118.00,
@@ -68,7 +68,7 @@
     "items": [
       {
         "product_id": "PROD-004",
-        "name": "FlexCore Seamless High-Rise Leggings",
+        "name": "Sunnystep FlexCore Movement Leggings",
         "size": "M",
         "quantity": 1,
         "unit_price": 74.00,
@@ -95,7 +95,7 @@
     "items": [
       {
         "product_id": "PROD-002",
-        "name": "AeroStride Carbon Running Jacket",
+        "name": "Sunnystep AeroStride Weather Jacket",
         "size": "M",
         "quantity": 1,
         "unit_price": 165.00,
@@ -121,7 +121,7 @@
     "items": [
       {
         "product_id": "PROD-001",
-        "name": "CloudKnit Merino Hoodie",
+        "name": "Sunnystep CloudKnit Merino Hoodie",
         "size": "M",
         "quantity": 1,
         "unit_price": 118.00,
@@ -132,4 +132,3 @@
     "cancellation_id": null
   }
 ]
-

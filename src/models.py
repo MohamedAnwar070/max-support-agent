@@ -1,15 +1,14 @@
-"""Data models and structured response schemas for the Customer Support Agent."""
-
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional
+
+from .constants import DEFAULT_BACKEND
 
 
 @dataclass
 class ToolCallRecord:
-    """Record of a single tool invocation made by the agent."""
     tool_name: str
     arguments: Dict[str, Any]
-    status: str  # "success", "error", "blocked", "conflict", "duplicate", "missing_info"
+    status: str
     output: Dict[str, Any]
 
     def to_dict(self) -> Dict[str, Any]:
@@ -18,10 +17,9 @@ class ToolCallRecord:
 
 @dataclass
 class EscalationTicket:
-    """Structured human-handoff ticket created when an issue is escalated."""
     ticket_id: str
-    category: str  # "policy_conflict", "tool_failure", "unsafe_action", "customer_request"
-    severity: str  # "high", "medium", "low"
+    category: str
+    severity: str
     reason: str
     order_id: Optional[str] = None
     customer_email: Optional[str] = None
@@ -32,25 +30,14 @@ class EscalationTicket:
 
 @dataclass
 class AgentResponse:
-    """Complete structured response from a single turn of the support agent."""
     reply: str
     decision_type: str
-    # Canonical decision_type values:
-    # - "answer"
-    # - "clarify_missing_info"
-    # - "action_completed"
-    # - "escalated_policy_conflict"
-    # - "escalated_tool_failure"
-    # - "escalated_unsafe_or_complex"
-    # - "blocked_unauthorized"
-    # - "blocked_prompt_injection"
-    # - "duplicate_request_handled"
     tools_called: List[ToolCallRecord] = field(default_factory=list)
     escalated: bool = False
     escalation_ticket: Optional[EscalationTicket] = None
     blocked: bool = False
     blocked_reason: Optional[str] = None
-    backend_used: str = "hybrid"
+    backend_used: str = DEFAULT_BACKEND
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -65,4 +52,3 @@ class AgentResponse:
             "backend_used": self.backend_used,
             "metadata": self.metadata,
         }
-

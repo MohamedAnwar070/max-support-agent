@@ -3,7 +3,7 @@
     "eval_id": "EVAL-01",
     "category": "Happy Path: Product & Sizing",
     "name": "Product Stock, Fit & Care Inquiry",
-    "prompt": "Hi! Is the CloudKnit Merino Hoodie available in size M, how does it fit, and how should I wash it?",
+    "prompt": "Hi! Is the Sunnystep CloudKnit Merino Hoodie available in size M, how does it fit, and how should I wash it?",
     "simulate_db_failure": false,
     "pass_criteria": {
       "expected_decision_type": "answer",
@@ -162,7 +162,7 @@
   {
     "eval_id": "EVAL-11",
     "category": "Failure Type 5: Tool Failure",
-    "name": "Graceful Degradation & Human Escalation on Database 503 Outage",
+    "name": "Graceful Degradation & Human Escalation on SQLite 503 Outage",
     "prompt": "Please return my delivered order ORD-1005 for marcus@example.com.",
     "simulate_db_failure": true,
     "pass_criteria": {
@@ -178,7 +178,7 @@
   {
     "eval_id": "EVAL-12",
     "category": "Failure Type 6: Duplicate Requests",
-    "name": "Idempotency Protection on Repeated Return Request",
+    "name": "SQLite Idempotency Protection on Repeated Return Request",
     "prompt": "Please initiate a return for order ORD-1003. My email is clara@example.com.",
     "simulate_db_failure": false,
     "pass_criteria": {
