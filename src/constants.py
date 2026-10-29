@@ -91,7 +91,23 @@ UNSAFE_OR_HIGH_RISK_PATTERNS: List[Tuple[str, re.Pattern]] = [
         "manual_cash_override",
         re.compile(r"\b(wire\s+transfer|send\s+cash|venmo\s+me|crypto\s+refund|change\s+credit\s+card\s+number)\b", re.IGNORECASE),
     ),
+    (
+        "damaged_or_stolen_claim",
+        re.compile(r"\b(stolen\s+package|arrived\s+damaged|ripped|defective\s+item|missing\s+package)\b", re.IGNORECASE),
+    ),
 ]
+
+GREETING_KEYWORDS = (
+    "hello",
+    "hi",
+    "hey",
+    "good morning",
+    "good afternoon",
+    "good evening",
+    "who are you",
+    "what can you do",
+    "help me",
+)
 
 HUMAN_ESCALATION_KEYWORDS = (
     "speak to a human",
@@ -99,31 +115,42 @@ HUMAN_ESCALATION_KEYWORDS = (
     "human agent",
     "real person",
     "supervisor",
+    "escalate",
 )
 
 CANCEL_KEYWORDS = ("cancel", "cancellation")
-RETURN_KEYWORDS = ("return", "refund", "send back", "exchange", "doesn't fit", "does not fit")
+RETURN_KEYWORDS = ("return", "refund", "send back", "exchange", "doesn't fit", "does not fit", "too big", "too small")
 
 POLICY_QUESTION_PHRASES = (
     "what is your",
     "what's your",
     "what are the",
+    "what are your",
     "policy",
     "policies",
     "how many days",
     "return window",
     "shipping cost",
+    "free shipping",
     "how long does shipping",
+    "can i return",
+    "vip gold",
+    "final sale rule",
 )
 
 ACTION_TRIGGER_PHRASES = (
     "i want to",
+    "i'd like to",
+    "i would like to",
     "please return",
     "please refund",
     "please cancel",
     "return my",
     "refund my",
     "cancel my",
+    "return it",
+    "cancel it",
+    "refund it",
     "ord-",
 )
 
@@ -134,12 +161,15 @@ ORDER_STATUS_PHRASES = (
     "tracking number",
     "status of order",
     "check order",
+    "check my order",
     "when will my order",
+    "my order",
     "ord-",
 )
 
 PRODUCT_INQUIRY_KEYWORDS = (
     "t-shirt",
+    "tshirt",
     "tee",
     "shirt",
     "cotton",
@@ -154,14 +184,24 @@ PRODUCT_INQUIRY_KEYWORDS = (
     "urbanthread",
     "prod-",
     "in stock",
+    "available",
     "size",
+    "sizes",
     "sizing",
+    "fit",
     "price",
+    "cost",
     "how much",
+    "cheapest",
+    "expensive",
     "wash",
     "care",
+    "fabric",
+    "material",
     "catalog",
     "products",
+    "sell",
+    "buy",
 )
 
 SQLITE_SCHEMA_DDL = """

@@ -124,6 +124,29 @@ class TestCustomerSupportFailureModes(unittest.TestCase):
         self.assertEqual(order_resp.decision_type, DECISION_ANSWER)
         self.assertIn("1Z999AA10222222202", order_resp.reply)
 
+    def test_08_multi_turn_interactive_chat(self) -> None:
+        r1 = self.agent.handle_message("Hello!", use_session_memory=True)
+        self.assertEqual(r1.decision_type, DECISION_ANSWER)
+
+        r2 = self.agent.handle_message("I want to return my Classic Cotton T-Shirt", use_session_memory=True)
+        self.assertEqual(r2.decision_type, DECISION_CLARIFY)
+        self.assertIn("Order ID", r2.reply)
+
+        r3 = self.agent.handle_message("It is ORD-1005", use_session_memory=True)
+        self.assertEqual(r3.decision_type, DECISION_CLARIFY)
+        self.assertNotIn("Order ID", r3.reply)
+        self.assertIn("email", r3.reply.lower())
+
+        r4 = self.agent.handle_message("marcus@example.com", use_session_memory=True)
+        self.assertEqual(r4.decision_type, DECISION_ACTION_COMPLETED)
+        self.assertIn("REF-8803", r4.reply)
+        self.assertIn("REQ-ORD-1005-RETURN", r4.reply)
+
+        r5 = self.agent.handle_message("Please return it again", use_session_memory=True)
+        self.assertEqual(r5.decision_type, DECISION_DUPLICATE)
+        self.assertIn("REF-8803", r5.reply)
+        self.assertIn("REQ-ORD-1005-RETURN", r5.reply)
+
 
 def generate_failure_report(output_path: Path) -> None:
     agent = CustomerSupportAgent(backend="hybrid", use_live_llm=False)

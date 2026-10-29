@@ -4,6 +4,26 @@ from src.agent import CustomerSupportAgent
 from src.constants import BRAND_NAME, DEFAULT_BACKEND, DEMO_SCENARIOS
 
 
+def _print_reference_guide(agent: CustomerSupportAgent) -> None:
+    print("\n--- Fictional SQLite Records Available for Live Testing ---")
+    for o in agent.store.orders:
+        item_names = ", ".join(f"{i['name']} ({i['size']})" for i in o["items"])
+        req_note = f" | req_key={o['request_key']} ({o['active_return_id']})" if o.get("request_key") else ""
+        print(
+            f"  * {o['order_id']} | owner={o['customer_email']} ({o['loyalty_tier']}) | "
+            f"status={o['status']} | ${o['total_amount']:.2f} | {item_names}{req_note}"
+        )
+    print("\n--- Interactive Chat Commands ---")
+    print("  /orders    : Show live SQLite orders table")
+    print("  /products  : Show UrbanThread product catalog")
+    print("  /policies  : Show store policies (7-day return rule, Final Sale, VIP Gold)")
+    print("  /fail on   : Simulate SQLite 503 database outage (Failure #5)")
+    print("  /fail off  : Restore normal SQLite database operation")
+    print("  /reset     : Reset SQLite database and multi-turn session memory")
+    print("  exit       : Quit interactive chat")
+    print("-" * 76)
+
+
 def run_demo(backend: str, use_live_llm: bool) -> None:
     agent = CustomerSupportAgent(backend=backend, use_live_llm=use_live_llm)
     print("=" * 80)
@@ -19,7 +39,7 @@ def run_demo(backend: str, use_live_llm: bool) -> None:
 
         print(f"\n>>> SCENARIO: {title}")
         print(f"Customer: {actual_prompt}")
-        resp = agent.handle_message(actual_prompt)
+        resp = agent.handle_message(actual_prompt, use_session_memory=False)
         tools_str = ", ".join(f"{t.tool_name}({t.status})" for t in resp.tools_called) or "None (Blocked Pre-Tool)"
         print(f"[Decision: {resp.decision_type} | Tools: {tools_str} | Escalated: {resp.escalated} | Blocked: {resp.blocked}]")
         print(f"Agent:\n{resp.reply}")
@@ -28,32 +48,58 @@ def run_demo(backend: str, use_live_llm: bool) -> None:
 
 def run_interactive(backend: str, use_live_llm: bool) -> None:
     agent = CustomerSupportAgent(backend=backend, use_live_llm=use_live_llm)
-    print("=" * 72)
-    print(f"{BRAND_NAME} — Interactive Customer Support Agent (SQLite + Hybrid LLM)")
+    print("=" * 76)
+    print(f"{BRAND_NAME} — Live Multi-Turn Customer Support Chat (SQLite + Hybrid LLM)")
     print(f"Active Backend: {agent._resolve_active_backend_label()}")
-    print("Type 'exit' or 'quit' to quit, 'reset' to re-seed SQLite database.")
-    print("=" * 72)
+    print("=" * 76)
+    _print_reference_guide(agent)
 
     while True:
         try:
-            user_input = input("\nYou: ").strip()
+            user_input = input("\nCustomer: ").strip()
         except (EOFError, KeyboardInterrupt):
-            print("\nExiting.")
+            print("\nExiting chat.")
             break
 
         if not user_input:
             continue
-        if user_input.lower() in ("exit", "quit"):
+        cmd = user_input.lower()
+        if cmd in ("exit", "quit", "/exit", "/quit"):
             break
-        if user_input.lower() == "reset":
+        if cmd in ("reset", "/reset"):
             agent.store.reset()
-            print("[SQLite database reset to initial seed state.]")
+            agent.reset_session()
+            print("[SQLite database and multi-turn session memory reset.]")
+            continue
+        if cmd == "/orders":
+            _print_reference_guide(agent)
+            continue
+        if cmd == "/products":
+            for p in agent.store.products:
+                sale_flag = " [FINAL SALE]" if p["final_sale"] else " [7-Day Returnable]"
+                print(f"  * {p['product_id']}: {p['name']} (${p['price']:.2f}){sale_flag} | Sizes: {', '.join(p['sizes_in_stock'])}")
+            continue
+        if cmd == "/policies":
+            pols, _ = agent.store.query_policies("all")
+            for pol in pols:
+                print(f"  * {pol['policy_id']} ({pol['title']}): {pol['rule']}")
+            continue
+        if cmd == "/fail on":
+            agent.store.simulate_db_failure = True
+            print("[Simulated SQLite 503 Tool Failure: ENABLED]")
+            continue
+        if cmd == "/fail off":
+            agent.store.simulate_db_failure = False
+            print("[Simulated SQLite 503 Tool Failure: DISABLED]")
             continue
 
-        resp = agent.handle_message(user_input)
+        resp = agent.handle_message(user_input, use_session_memory=True)
         tools_str = ", ".join(f"{t.tool_name}({t.status})" for t in resp.tools_called) or "None"
-        print(f"\n[Decision: {resp.decision_type} | Tools: {tools_str} | Backend: {resp.backend_used}]")
-        print(f"Agent: {resp.reply}")
+        print(
+            f"\n[Decision: {resp.decision_type} | Tools: {tools_str} | "
+            f"Escalated: {resp.escalated} | Blocked: {resp.blocked} | Backend: {resp.backend_used}]"
+        )
+        print(f"Agent:\n{resp.reply}")
 
 
 def main() -> None:

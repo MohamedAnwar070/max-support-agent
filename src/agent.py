@@ -1,4 +1,4 @@
-from typing import Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from .config import get_settings
 from .constants import (
@@ -19,6 +19,7 @@ from .constants import (
     DECISION_ESCALATED_TOOL_FAILURE,
     DECISION_ESCALATED_UNSAFE,
     EMAIL_PATTERN,
+    GREETING_KEYWORDS,
     HUMAN_ESCALATION_KEYWORDS,
     ORDER_ID_PATTERN,
     ORDER_STATUS_PHRASES,
@@ -32,6 +33,7 @@ from .constants import (
     STATUS_DENIED,
     STATUS_DUPLICATE,
     STATUS_ERROR,
+    STATUS_SUCCESS,
 )
 from .data_store import DataStore
 from .guardrails import (
@@ -59,6 +61,17 @@ class CustomerSupportAgent:
 
         self.backend_mode = (backend or settings.backend).lower()
         self.use_live_llm = settings.use_live_llm if use_live_llm is None else use_live_llm
+
+        self.session_order_id: Optional[str] = None
+        self.session_email: Optional[str] = None
+        self.pending_intent: Optional[str] = None
+        self.conversation_history: List[Dict[str, str]] = []
+
+    def reset_session(self) -> None:
+        self.session_order_id = None
+        self.session_email = None
+        self.pending_intent = None
+        self.conversation_history = []
 
     def _resolve_active_backend_label(self) -> str:
         if self.backend_mode == "openai" and self.openai_backend.is_available():
@@ -96,8 +109,8 @@ class CustomerSupportAgent:
         return order_id, email, request_key
 
     @staticmethod
-    def _classify_intent(message: str) -> str:
-        text = message.lower()
+    def _classify_intent(message: str, pending_intent: Optional[str] = None) -> str:
+        text = message.strip().lower()
 
         if any(p in text for p in HUMAN_ESCALATION_KEYWORDS):
             return "human_escalation"
@@ -114,14 +127,25 @@ class CustomerSupportAgent:
         if is_return and not is_policy_question:
             return "return_order"
 
+        has_order_id = bool(ORDER_ID_PATTERN.search(message))
+        has_email = bool(EMAIL_PATTERN.search(message))
+        if pending_intent and (has_order_id or has_email):
+            return pending_intent
+
         if any(p in text for p in ORDER_STATUS_PHRASES):
             return "order_status"
+
+        if is_policy_question and any(p in text for p in PRODUCT_INQUIRY_KEYWORDS):
+            return "combined_product_and_policy"
 
         if is_policy_question:
             return "policy_question"
 
         if any(p in text for p in PRODUCT_INQUIRY_KEYWORDS):
             return "product_question"
+
+        if any(text == g or text.startswith(g + " ") or text.startswith(g + "!") for g in GREETING_KEYWORDS):
+            return "greeting"
 
         return "general_inquiry"
 
@@ -159,6 +183,7 @@ class CustomerSupportAgent:
         user_message: str,
         customer_email: Optional[str] = None,
         order_id: Optional[str] = None,
+        use_session_memory: bool = False,
     ) -> AgentResponse:
         self.toolkit.clear_turn_history()
 
@@ -181,11 +206,15 @@ class CustomerSupportAgent:
                 metadata={"guardrail_triggered": injection_rule},
             )
 
+        fallback_email = customer_email or (self.session_email if use_session_memory else None)
+        fallback_order = order_id or (self.session_order_id if use_session_memory else None)
         extracted_order_id, extracted_email, extracted_req_key = self._extract_entities(
-            user_message, customer_email, order_id
+            user_message, fallback_email, fallback_order
         )
+
         is_unsafe, unsafe_rule = detect_unsafe_request(user_message)
         if is_unsafe:
+            self.pending_intent = None
             self.toolkit.escalate_to_human(
                 reason=f"Customer message triggered high-risk safety rule '{unsafe_rule}': {user_message}",
                 category="unsafe_action",
@@ -196,22 +225,24 @@ class CustomerSupportAgent:
             ticket = self.toolkit.last_escalation
             ticket_id = ticket.ticket_id if ticket else "ESC-9001"
             draft = (
-                f"For your security and protection, I am unable to process this request through automated chat. "
-                f"I have escalated your case to a Senior Human Support Specialist under Ticket {ticket_id}."
+                f"Because your request involves `{unsafe_rule}`, I cannot resolve this automatically. "
+                f"I have escalated your case to a Human Support Specialist under Ticket **{ticket_id}**."
             )
-            return AgentResponse(
-                reply=draft,
+            return self._finalize_response(
+                user_message=user_message,
+                draft_reply=draft,
                 decision_type=DECISION_ESCALATED_UNSAFE,
-                tools_called=list(self.toolkit.call_history),
+                authenticated_email=extracted_email,
                 escalated=True,
-                escalation_ticket=ticket,
-                blocked=False,
-                backend_used=self._resolve_active_backend_label(),
             )
 
-        intent = self._classify_intent(user_message)
+        intent = self._classify_intent(
+            user_message,
+            pending_intent=self.pending_intent if use_session_memory else None,
+        )
 
         if intent == "human_escalation":
+            self.pending_intent = None
             self.toolkit.escalate_to_human(
                 reason=f"Customer explicitly requested a human specialist: {user_message}",
                 category="customer_request",
@@ -223,7 +254,7 @@ class CustomerSupportAgent:
             ticket_id = ticket.ticket_id if ticket else "ESC-9001"
             draft = (
                 f"I have connected your conversation to a Human Support Specialist under Ticket "
-                f"{ticket_id}. A team member will follow up with you shortly."
+                f"**{ticket_id}**. A team member will follow up with you shortly."
             )
             return self._finalize_response(
                 user_message=user_message,
@@ -233,10 +264,32 @@ class CustomerSupportAgent:
                 escalated=True,
             )
 
+        if intent == "greeting":
+            self.toolkit.lookup_products(query="all")
+            self.toolkit.lookup_policies(topic="returns")
+            draft = (
+                f"Welcome to **{BRAND_NAME} Customer Support**! I can help you with:\n"
+                f"- **Product & Sizing Inquiries:** e.g., our *Classic Cotton T-Shirt* (`PROD-001`, $38.00), hoodies, chinos, sweaters, and clearance outerwear.\n"
+                f"- **Store Policies:** Our **7-day return & mock refund policy (`POL-RET-01`)**, Final Sale rules (`POL-RET-02`), VIP Gold benefits (`POL-VIP-01`), and shipping.\n"
+                f"- **Order Tracking, Returns & Cancellations:** Provide your **Order ID** (e.g., `ORD-1002`) and **email address** to track, cancel, or request a mock refund."
+            )
+            return self._finalize_response(
+                user_message=user_message,
+                draft_reply=draft,
+                decision_type=DECISION_ANSWER,
+                authenticated_email=extracted_email,
+            )
+
         if intent in ("return_order", "cancel_order"):
             action = "cancel" if intent == "cancel_order" else "return"
 
             if not extracted_order_id or not extracted_email:
+                if use_session_memory:
+                    self.pending_intent = intent
+                    if extracted_order_id:
+                        self.session_order_id = extracted_order_id
+                    if extracted_email:
+                        self.session_email = extracted_email
                 missing_parts = []
                 if not extracted_order_id:
                     missing_parts.append("your **Order ID** (e.g., `ORD-1001`)")
@@ -253,6 +306,11 @@ class CustomerSupportAgent:
                     decision_type=DECISION_CLARIFY,
                     authenticated_email=extracted_email,
                 )
+
+            if use_session_memory:
+                self.pending_intent = None
+                self.session_order_id = extracted_order_id
+                self.session_email = extracted_email
 
             res = self.toolkit.process_return_or_cancel(
                 order_id=extracted_order_id,
@@ -380,6 +438,12 @@ class CustomerSupportAgent:
 
         if intent == "order_status":
             if not extracted_order_id or not extracted_email:
+                if use_session_memory:
+                    self.pending_intent = "order_status"
+                    if extracted_order_id:
+                        self.session_order_id = extracted_order_id
+                    if extracted_email:
+                        self.session_email = extracted_email
                 missing_parts = []
                 if not extracted_order_id:
                     missing_parts.append("your **Order ID** (e.g., `ORD-1002`)")
@@ -395,6 +459,9 @@ class CustomerSupportAgent:
                     decision_type=DECISION_CLARIFY,
                     authenticated_email=extracted_email,
                 )
+
+            if use_session_memory:
+                self.pending_intent = None
 
             res = self.toolkit.get_order_status(order_id=extracted_order_id, customer_email=extracted_email)
             status = res.get("status")
@@ -444,6 +511,10 @@ class CustomerSupportAgent:
                     authenticated_email=extracted_email,
                 )
 
+            if use_session_memory and status == STATUS_SUCCESS:
+                self.session_order_id = extracted_order_id
+                self.session_email = extracted_email
+
             order_data = res["order"]
             items_summary = ", ".join(f"{i['name']} (Size {i['size']})" for i in order_data["items"])
             tracking_info = (
@@ -465,6 +536,43 @@ class CustomerSupportAgent:
                 f"- **Tracking:** {tracking_info}\n"
                 f"- **Delivery:** {delivery_note}"
             )
+            return self._finalize_response(
+                user_message=user_message,
+                draft_reply=draft,
+                decision_type=DECISION_ANSWER,
+                authenticated_email=extracted_email,
+            )
+
+        if intent == "combined_product_and_policy":
+            prod_res = self.toolkit.lookup_products(query=user_message)
+            pol_res = self.toolkit.lookup_policies(topic="all")
+            if prod_res.get("status") == STATUS_ERROR or pol_res.get("status") == STATUS_ERROR:
+                self.toolkit.escalate_to_human(
+                    reason="Database error during combined product and policy lookup.",
+                    category="tool_failure",
+                    severity="medium",
+                )
+                ticket = self.toolkit.last_escalation
+                ticket_id = ticket.ticket_id if ticket else "ESC-9001"
+                draft = (
+                    f"Your inquiry **could not be verified** due to a temporary database outage. "
+                    f"I have escalated your request to a Human Specialist under Ticket **{ticket_id}**."
+                )
+                return self._finalize_response(
+                    user_message=user_message,
+                    draft_reply=draft,
+                    decision_type=DECISION_ESCALATED_TOOL_FAILURE,
+                    authenticated_email=extracted_email,
+                    escalated=True,
+                )
+            products = prod_res.get("products", [])
+            policies = pol_res.get("policies", [])
+            prod_summary = "\n".join(
+                f"- **{p['name']} (`{p['product_id']}`)** — **${p['price']:.2f}** (Sizes: {', '.join(p['sizes_in_stock'])})"
+                for p in products
+            )
+            pol_summary = "\n".join(f"- **{p['title']} (`{p['policy_id']}`):** {p['rule']}" for p in policies)
+            draft = f"**{BRAND_NAME} Products:**\n{prod_summary}\n\n**Official Policies:**\n{pol_summary}"
             return self._finalize_response(
                 user_message=user_message,
                 draft_reply=draft,
@@ -494,7 +602,7 @@ class CustomerSupportAgent:
                 ticket = self.toolkit.last_escalation
                 ticket_id = ticket.ticket_id if ticket else "ESC-9001"
                 draft = (
-                    f"Policy details could not be verified because our policy database is temporarily unavailable. "
+                    f"Policy details **could not be verified** because our policy database is temporarily unavailable. "
                     f"I have escalated your question to a Human Specialist under Ticket **{ticket_id}**."
                 )
                 return self._finalize_response(
@@ -548,7 +656,7 @@ class CustomerSupportAgent:
             ticket = self.toolkit.last_escalation
             ticket_id = ticket.ticket_id if ticket else "ESC-9001"
             draft = (
-                f"Product availability could not be verified because our catalog database is temporarily unavailable. "
+                f"Product availability **could not be verified** because our catalog database is temporarily unavailable. "
                 f"I have created Escalation Ticket **{ticket_id}** for a specialist to assist you."
             )
             return self._finalize_response(
@@ -604,6 +712,8 @@ class CustomerSupportAgent:
             all_orders=self.store.orders,
             all_customers=self.store.customers,
         )
+        self.conversation_history.append({"role": "user", "content": user_message})
+        self.conversation_history.append({"role": "assistant", "content": safe_reply})
         return AgentResponse(
             reply=safe_reply,
             decision_type=decision_type,
