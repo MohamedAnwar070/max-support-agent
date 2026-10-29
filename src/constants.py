@@ -47,7 +47,8 @@ CODE_DUPLICATE = "DUPLICATE_REQUEST_DETECTED"
 CODE_MISSING_PARAMS = "MISSING_REQUIRED_PARAMETERS"
 CODE_ORDER_NOT_FOUND = "ORDER_NOT_FOUND"
 
-ORDER_ID_PATTERN = re.compile(r"\b(ORD-\d{3,6})\b", re.IGNORECASE)
+ORDER_ID_PATTERN = re.compile(r"\b(?:ORD-|(?:ORDER|ID)\s*[-:#]?\s*|#)?(100\d)\b|\b(ORD-\d{3,6})\b", re.IGNORECASE)
+CUSTOMER_ID_PATTERN = re.compile(r"\b(CUST-\d{2,6})\b", re.IGNORECASE)
 EMAIL_PATTERN = re.compile(r"\b([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)\b")
 REQUEST_KEY_PATTERN = re.compile(r"\b(REQ-[A-Z0-9-]+)\b", re.IGNORECASE)
 
@@ -105,8 +106,64 @@ GREETING_KEYWORDS = (
     "good afternoon",
     "good evening",
     "who are you",
+    "what is this",
     "what can you do",
     "help me",
+    "help",
+)
+
+FAREWELL_KEYWORDS = (
+    "bye",
+    "goodbye",
+    "good bye",
+    "see ya",
+    "see you",
+    "thanks",
+    "thank you",
+    "that's all",
+    "thats all",
+    "nothing else",
+    "done",
+)
+
+AFFIRMATIVE_FOLLOWUP_WORDS = (
+    "yes",
+    "yep",
+    "yeah",
+    "sure",
+    "ok",
+    "okay",
+    "please do",
+    "go ahead",
+)
+
+PURCHASE_INTENT_KEYWORDS = (
+    "i want to buy",
+    "want to buy",
+    "wanna buy",
+    "like to buy",
+    "purchase",
+    "add to cart",
+    "place an order",
+    "order a ",
+    "suggest what i buy",
+    "recommend",
+)
+
+ACCOUNT_OR_ORDER_HISTORY_KEYWORDS = (
+    "purchased",
+    "bought",
+    "order history",
+    "my orders",
+    "what did i buy",
+    "what alice",
+    "what bob",
+    "what clara",
+    "what marcus",
+    "alice vance",
+    "bob miller",
+    "clara chen",
+    "marcus sterling",
 )
 
 HUMAN_ESCALATION_KEYWORDS = (
@@ -148,6 +205,9 @@ ACTION_TRIGGER_PHRASES = (
     "return my",
     "refund my",
     "cancel my",
+    "return this",
+    "cancel this",
+    "refund this",
     "return it",
     "cancel it",
     "refund it",
@@ -301,6 +361,11 @@ CREATE TABLE IF NOT EXISTS escalations (
 
 SYSTEM_PROMPT = """You are the official AI Customer Support Agent for UrbanThread Apparel Co.
 Your job is to help customers accurately, politely, and safely using ONLY the provided SQLite tool outputs and official store policies.
+
+CRITICAL OUTPUT FORMAT RULES:
+- Output ONLY the direct message to the customer (2 to 4 concise sentences).
+- NEVER output developer notes, pipeline commentary, meta-analysis, horizontal dividers (---), or prefixes like "Reply:".
+- Preserve exact IDs (ORD-*, REF-*, CAN-*, ESC-*, POL-*, REQ-*, PROD-*), dollar amounts, and tracking numbers that appear in the reference draft.
 
 STRICT OPERATING RULES FOR THE SIX FAILURE MODES:
 1. MISSING INFORMATION: Ask a targeted clarification when order_id or customer_email is missing. Never guess an order_id or email.

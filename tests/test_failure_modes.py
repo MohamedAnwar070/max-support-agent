@@ -147,6 +147,44 @@ class TestCustomerSupportFailureModes(unittest.TestCase):
         self.assertIn("REF-8803", r5.reply)
         self.assertIn("REQ-ORD-1005-RETURN", r5.reply)
 
+    def test_09_user_live_transcript_edge_cases(self) -> None:
+        r_what = self.agent.handle_message("what is this ?", use_session_memory=True)
+        self.assertEqual(r_what.decision_type, DECISION_ANSWER)
+        self.assertEqual(len(r_what.tools_called), 0)
+
+        r_alice = self.agent.handle_message("what alice purchased?", use_session_memory=True)
+        self.assertEqual(r_alice.decision_type, DECISION_CLARIFY)
+        self.assertEqual(len(r_alice.tools_called), 0)
+
+        r_cust = self.agent.handle_message("alice vance id - cust-101", use_session_memory=True)
+        self.assertEqual(r_cust.decision_type, DECISION_CLARIFY)
+        self.assertEqual(len(r_cust.tools_called), 0)
+
+        r_id = self.agent.handle_message("id - 1001", use_session_memory=True)
+        self.assertEqual(r_id.decision_type, DECISION_CLARIFY)
+        self.assertEqual(self.agent.session_order_id, "ORD-1001")
+
+        r_bye = self.agent.handle_message("bye", use_session_memory=True)
+        self.assertEqual(r_bye.decision_type, DECISION_ANSWER)
+        self.assertEqual(len(r_bye.tools_called), 0)
+
+        self.agent.reset_session()
+        r_ret = self.agent.handle_message("i want to return this", use_session_memory=True)
+        self.assertEqual(r_ret.decision_type, DECISION_CLARIFY)
+
+        r_short_ord = self.agent.handle_message("1001 alice@example.com", use_session_memory=True)
+        self.assertEqual(r_short_ord.decision_type, DECISION_ESCALATED_CONFLICT)
+        self.assertTrue(r_short_ord.escalated)
+
+        r_buy = self.agent.handle_message("i want to buyMetro Fleece Zip Hoodie", use_session_memory=True)
+        self.assertEqual(r_buy.decision_type, DECISION_ANSWER)
+        self.assertIn("PROD-002", r_buy.reply)
+        self.assertNotIn("PROD-003", r_buy.reply)
+
+        r_yes = self.agent.handle_message("yes L size purchase", use_session_memory=True)
+        self.assertEqual(r_yes.decision_type, DECISION_ANSWER)
+        self.assertIn("PROD-002", r_yes.reply)
+
 
 def generate_failure_report(output_path: Path) -> None:
     agent = CustomerSupportAgent(backend="hybrid", use_live_llm=False)

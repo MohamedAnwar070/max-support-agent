@@ -2,6 +2,7 @@ import glob
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 from typing import Any, Dict, List, Optional
@@ -9,6 +10,20 @@ import urllib.request
 
 from .config import get_settings
 from .constants import OPENAI_CHAT_COMPLETIONS_URL, SYSTEM_PROMPT
+
+
+def _clean_llm_output(raw_text: str) -> str:
+    lines = [
+        line
+        for line in raw_text.strip().splitlines()
+        if not line.startswith("Warning: no stdin data received")
+    ]
+    text = "\n".join(lines).strip()
+    if "\n---" in text:
+        text = text.split("\n---", 1)[0].strip()
+    text = re.sub(r"^\*\*Reply:\*\*\s*", "", text, flags=re.IGNORECASE).strip()
+    text = re.sub(r"^Reply:\s*", "", text, flags=re.IGNORECASE).strip()
+    return text
 
 
 def find_claude_cli_binary() -> Optional[str]:
@@ -62,9 +77,10 @@ class ClaudeCodeCLIBackend:
             f"CUSTOMER MESSAGE:\n{user_message}\n\n"
             f"DECISION TYPE: {decision_type}\n"
             f"TOOL EXECUTION RESULTS (JSON):\n{json.dumps(tool_records, indent=2)}\n\n"
-            f"REFERENCE DRAFT (preserve all IDs, policy codes, dollar amounts, and tracking numbers from this draft):\n"
-            f"{fallback_reply}\n\n"
-            "Write the final customer support reply in 2-4 concise sentences. Include every specific ID (Order ID, Ticket ID, Return/Cancel ID, Policy ID, Tracking Number) present in the reference draft."
+            f"REFERENCE DRAFT:\n{fallback_reply}\n\n"
+            "Write ONLY the direct customer support reply in 2-4 concise sentences. "
+            "Include all exact IDs (ORD-*, REF-*, CAN-*, ESC-*, POL-*, REQ-*, PROD-*), dollar amounts, and tracking numbers present in the reference draft. "
+            "Do NOT include any developer notes, pipeline commentary, or '---' dividers."
         )
         try:
             proc = subprocess.run(
@@ -76,12 +92,7 @@ class ClaudeCodeCLIBackend:
                 timeout=self.timeout_sec,
             )
             if proc.returncode == 0 and proc.stdout.strip():
-                lines = [
-                    line
-                    for line in proc.stdout.strip().splitlines()
-                    if not line.startswith("Warning: no stdin data received")
-                ]
-                cleaned = "\n".join(lines).strip()
+                cleaned = _clean_llm_output(proc.stdout)
                 if cleaned:
                     return cleaned
         except Exception:
@@ -126,7 +137,7 @@ class OpenAIBackend:
                         f"Decision type: {decision_type}\n"
                         f"Executed tool results: {json.dumps(tool_records)}\n\n"
                         f"Verified facts to include: {fallback_reply}\n\n"
-                        "Respond directly to the customer in 2-4 concise sentences, preserving all exact IDs (ORD-*, RET-*, CAN-*, ESC-*, POL-*), prices, and tracking numbers."
+                        "Respond directly to the customer in 2-4 concise sentences, preserving all exact IDs (ORD-*, REF-*, CAN-*, ESC-*, POL-*, REQ-*, PROD-*), prices, and tracking numbers."
                     ),
                 },
             ],
@@ -145,7 +156,7 @@ class OpenAIBackend:
                 body = json.loads(resp.read().decode("utf-8"))
                 content = body["choices"][0]["message"].get("content", "").strip()
                 if content:
-                    return content
+                    return _clean_llm_output(content)
         except Exception:
             pass
         return fallback_reply

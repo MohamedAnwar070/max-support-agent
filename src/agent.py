@@ -1,14 +1,18 @@
-from typing import Dict, List, Optional, Tuple
+import re
+from typing import Any, Dict, List, Optional, Tuple
 
 from .config import get_settings
 from .constants import (
+    ACCOUNT_OR_ORDER_HISTORY_KEYWORDS,
     ACTION_TRIGGER_PHRASES,
+    AFFIRMATIVE_FOLLOWUP_WORDS,
     BRAND_NAME,
     CANCEL_KEYWORDS,
     CODE_CONFLICT_VIP_FINAL_SALE,
     CODE_DUPLICATE,
     CODE_TOOL_ERROR,
     CODE_UNAUTHORIZED,
+    CUSTOMER_ID_PATTERN,
     DECISION_ACTION_COMPLETED,
     DECISION_ANSWER,
     DECISION_BLOCKED_INJECTION,
@@ -19,12 +23,14 @@ from .constants import (
     DECISION_ESCALATED_TOOL_FAILURE,
     DECISION_ESCALATED_UNSAFE,
     EMAIL_PATTERN,
+    FAREWELL_KEYWORDS,
     GREETING_KEYWORDS,
     HUMAN_ESCALATION_KEYWORDS,
     ORDER_ID_PATTERN,
     ORDER_STATUS_PHRASES,
     POLICY_QUESTION_PHRASES,
     PRODUCT_INQUIRY_KEYWORDS,
+    PURCHASE_INTENT_KEYWORDS,
     REQUEST_KEY_PATTERN,
     RETURN_KEYWORDS,
     STANDARD_RETURN_WINDOW_DAYS,
@@ -64,14 +70,48 @@ class CustomerSupportAgent:
 
         self.session_order_id: Optional[str] = None
         self.session_email: Optional[str] = None
+        self.session_product_id: Optional[str] = None
         self.pending_intent: Optional[str] = None
+        self.verified_customer: Optional[Dict[str, Any]] = None
         self.conversation_history: List[Dict[str, str]] = []
 
     def reset_session(self) -> None:
         self.session_order_id = None
         self.session_email = None
+        self.session_product_id = None
         self.pending_intent = None
+        self.verified_customer = None
         self.conversation_history = []
+
+    def verify_customer_session(
+        self,
+        email: str,
+        order_id: Optional[str] = None,
+    ) -> Tuple[bool, str]:
+        cust = self.store.get_customer_by_email(email)
+        if not cust:
+            return False, f"No UrbanThread customer profile found for '{email}'."
+
+        if order_id:
+            norm_ord = order_id.strip().upper()
+            if not norm_ord.startswith("ORD-"):
+                norm_ord = f"ORD-{norm_ord}"
+            order = self.store.get_order_by_id(norm_ord)
+            if not order or order["customer_email"].lower() != email.strip().lower():
+                return (
+                    False,
+                    f"Verification failed: Order '{norm_ord}' does not belong to '{email}'.",
+                )
+            self.session_order_id = order["order_id"]
+
+        self.session_email = cust["email"].lower()
+        self.verified_customer = cust
+        orders = self.store.get_orders_by_email(cust["email"])
+        order_ids = ", ".join(o["order_id"] for o in orders) or "None"
+        return (
+            True,
+            f"Verified customer: {cust['name']} ({cust['customer_id']} | {cust['email']} | Tier: {cust['loyalty_tier']} | Orders: {order_ids})",
+        )
 
     def _resolve_active_backend_label(self) -> str:
         if self.backend_mode == "openai" and self.openai_backend.is_available():
@@ -95,11 +135,14 @@ class CustomerSupportAgent:
         email_match = EMAIL_PATTERN.search(message)
         req_key_match = REQUEST_KEY_PATTERN.search(message)
 
-        order_id = (
-            order_match.group(1).upper()
-            if order_match
-            else (context_order_id.upper() if context_order_id else None)
-        )
+        order_id: Optional[str] = None
+        if order_match:
+            digits_only = order_match.group(1)
+            full_ord = order_match.group(2)
+            order_id = f"ORD-{digits_only}" if digits_only else full_ord.upper()
+        elif context_order_id:
+            order_id = context_order_id.upper()
+
         email = (
             email_match.group(1).lower()
             if email_match
@@ -109,8 +152,17 @@ class CustomerSupportAgent:
         return order_id, email, request_key
 
     @staticmethod
-    def _classify_intent(message: str, pending_intent: Optional[str] = None) -> str:
-        text = message.strip().lower()
+    def _classify_intent(
+        message: str,
+        pending_intent: Optional[str] = None,
+        session_product_id: Optional[str] = None,
+    ) -> str:
+        spaced = re.sub(r"([a-z])([A-Z])", r"\1 \2", message)
+        text = spaced.strip().lower()
+        clean_punct = re.sub(r"[^\w\s]", "", text).strip()
+
+        if any(clean_punct == f or clean_punct.startswith(f + " ") for f in FAREWELL_KEYWORDS):
+            return "farewell"
 
         if any(p in text for p in HUMAN_ESCALATION_KEYWORDS):
             return "human_escalation"
@@ -129,11 +181,25 @@ class CustomerSupportAgent:
 
         has_order_id = bool(ORDER_ID_PATTERN.search(message))
         has_email = bool(EMAIL_PATTERN.search(message))
+        has_cust_id = bool(CUSTOMER_ID_PATTERN.search(message))
+
         if pending_intent and (has_order_id or has_email):
             return pending_intent
 
-        if any(p in text for p in ORDER_STATUS_PHRASES):
+        if has_cust_id or any(k in text for k in ACCOUNT_OR_ORDER_HISTORY_KEYWORDS):
             return "order_status"
+
+        if has_order_id or any(p in text for p in ORDER_STATUS_PHRASES):
+            return "order_status"
+
+        if any(p in text for p in PURCHASE_INTENT_KEYWORDS):
+            return "purchase_inquiry"
+
+        if session_product_id and (
+            clean_punct in AFFIRMATIVE_FOLLOWUP_WORDS
+            or any(clean_punct.startswith(w + " ") for w in AFFIRMATIVE_FOLLOWUP_WORDS)
+        ):
+            return "purchase_inquiry"
 
         if is_policy_question and any(p in text for p in PRODUCT_INQUIRY_KEYWORDS):
             return "combined_product_and_policy"
@@ -144,10 +210,10 @@ class CustomerSupportAgent:
         if any(p in text for p in PRODUCT_INQUIRY_KEYWORDS):
             return "product_question"
 
-        if any(text == g or text.startswith(g + " ") or text.startswith(g + "!") for g in GREETING_KEYWORDS):
+        if any(clean_punct == g or clean_punct.startswith(g + " ") for g in GREETING_KEYWORDS):
             return "greeting"
 
-        return "general_inquiry"
+        return "unrecognized_or_general"
 
     def _polish_with_llm_if_enabled(
         self,
@@ -239,7 +305,21 @@ class CustomerSupportAgent:
         intent = self._classify_intent(
             user_message,
             pending_intent=self.pending_intent if use_session_memory else None,
+            session_product_id=self.session_product_id if use_session_memory else None,
         )
+
+        if intent == "farewell":
+            self.pending_intent = None
+            draft = (
+                f"Thank you for chatting with {BRAND_NAME} Customer Support! "
+                "Please reach out anytime if you need help with a product, policy, or order."
+            )
+            return self._finalize_response(
+                user_message=user_message,
+                draft_reply=draft,
+                decision_type=DECISION_ANSWER,
+                authenticated_email=extracted_email,
+            )
 
         if intent == "human_escalation":
             self.pending_intent = None
@@ -265,13 +345,12 @@ class CustomerSupportAgent:
             )
 
         if intent == "greeting":
-            self.toolkit.lookup_products(query="all")
-            self.toolkit.lookup_policies(topic="returns")
             draft = (
-                f"Welcome to **{BRAND_NAME} Customer Support**! I can help you with:\n"
-                f"- **Product & Sizing Inquiries:** e.g., our *Classic Cotton T-Shirt* (`PROD-001`, $38.00), hoodies, chinos, sweaters, and clearance outerwear.\n"
-                f"- **Store Policies:** Our **7-day return & mock refund policy (`POL-RET-01`)**, Final Sale rules (`POL-RET-02`), VIP Gold benefits (`POL-VIP-01`), and shipping.\n"
-                f"- **Order Tracking, Returns & Cancellations:** Provide your **Order ID** (e.g., `ORD-1002`) and **email address** to track, cancel, or request a mock refund."
+                f"Hello! I am the **{BRAND_NAME} Customer Support Agent**. I can help you with:\n"
+                f"1. **Customer & Order Verification:** Share your **Order ID** (e.g., `ORD-1002`) and **email address** to track an order, cancel a processing order, or request a 7-day return & mock refund.\n"
+                f"2. **Product Stock, Sizing & Care:** Ask about our *Classic Cotton T-Shirt* (`PROD-001`), *Metro Fleece Zip Hoodie* (`PROD-002`), chinos, sweaters, or clearance outerwear.\n"
+                f"3. **Store Policies:** Ask about our **7-day return policy (`POL-RET-01`)**, Final Sale rules (`POL-RET-02`), or VIP Gold perks (`POL-VIP-01`).\n\n"
+                f"How can I help you today?"
             )
             return self._finalize_response(
                 user_message=user_message,
@@ -446,12 +525,12 @@ class CustomerSupportAgent:
                         self.session_email = extracted_email
                 missing_parts = []
                 if not extracted_order_id:
-                    missing_parts.append("your **Order ID** (e.g., `ORD-1002`)")
+                    missing_parts.append("your **Order ID** (e.g., `ORD-1001`)")
                 if not extracted_email:
                     missing_parts.append("your **email address**")
                 draft = (
-                    f"To check your {BRAND_NAME} order status, could you please provide {' and '.join(missing_parts)} "
-                    f"so I can verify ownership and look up your order?"
+                    f"To protect customer privacy, I must verify your customer account before sharing order or purchase details. "
+                    f"Could you please provide {' and '.join(missing_parts)}?"
                 )
                 return self._finalize_response(
                     user_message=user_message,
@@ -646,48 +725,76 @@ class CustomerSupportAgent:
                 authenticated_email=extracted_email,
             )
 
-        res = self.toolkit.lookup_products(query=user_message)
-        if res.get("status") == STATUS_ERROR:
-            self.toolkit.escalate_to_human(
-                reason=f"Catalog lookup error: {res.get('message')}",
-                category="tool_failure",
-                severity="medium",
+        if intent in ("product_question", "purchase_inquiry"):
+            query_to_use = user_message
+            if intent == "purchase_inquiry" and use_session_memory and self.session_product_id:
+                if not any(k in user_message.lower() for k in ("shirt", "hoodie", "jacket", "chino", "pants", "sweater")):
+                    query_to_use = self.session_product_id
+
+            res = self.toolkit.lookup_products(query=query_to_use)
+            if res.get("status") == STATUS_ERROR:
+                self.toolkit.escalate_to_human(
+                    reason=f"Catalog lookup error: {res.get('message')}",
+                    category="tool_failure",
+                    severity="medium",
+                )
+                ticket = self.toolkit.last_escalation
+                ticket_id = ticket.ticket_id if ticket else "ESC-9001"
+                draft = (
+                    f"Product availability **could not be verified** because our catalog database is temporarily unavailable. "
+                    f"I have created Escalation Ticket **{ticket_id}** for a specialist to assist you."
+                )
+                return self._finalize_response(
+                    user_message=user_message,
+                    draft_reply=draft,
+                    decision_type=DECISION_ESCALATED_TOOL_FAILURE,
+                    authenticated_email=extracted_email,
+                    escalated=True,
+                )
+
+            products = res.get("products", [])
+            if use_session_memory and len(products) == 1:
+                self.session_product_id = products[0]["product_id"]
+
+            product_lines = []
+            for p in products:
+                sale_tag = (
+                    " **[FINAL SALE - Non-Returnable per POL-RET-02]**"
+                    if p.get("final_sale")
+                    else f" *(Standard {STANDARD_RETURN_WINDOW_DAYS}-day return eligible per POL-RET-01)*"
+                )
+                in_stock_str = ", ".join(p["sizes_in_stock"])
+                out_stock_str = ", ".join(p["sizes_out_of_stock"]) if p["sizes_out_of_stock"] else "None"
+                product_lines.append(
+                    f"- **{p['name']} (`{p['product_id']}`)** — **${p['price']:.2f}**{sale_tag}\n"
+                    f"  - *Sizes in stock:* {in_stock_str} (Out of stock: {out_stock_str})\n"
+                    f"  - *Fit Guide:* {p['fit_guide']}\n"
+                    f"  - *Fabric & Care:* {p['fabric_and_care']}"
+                )
+
+            checkout_note = (
+                "\n\n*(Note: As a Customer Support Agent, I can verify stock and sizing, while new purchases are completed directly on the UrbanThread storefront checkout.)*"
+                if intent == "purchase_inquiry"
+                else ""
             )
-            ticket = self.toolkit.last_escalation
-            ticket_id = ticket.ticket_id if ticket else "ESC-9001"
-            draft = (
-                f"Product availability **could not be verified** because our catalog database is temporarily unavailable. "
-                f"I have created Escalation Ticket **{ticket_id}** for a specialist to assist you."
-            )
+            draft = f"Here are the matching {BRAND_NAME} product details:\n" + "\n".join(product_lines) + checkout_note
             return self._finalize_response(
                 user_message=user_message,
                 draft_reply=draft,
-                decision_type=DECISION_ESCALATED_TOOL_FAILURE,
+                decision_type=DECISION_ANSWER,
                 authenticated_email=extracted_email,
-                escalated=True,
             )
 
-        products = res.get("products", [])
-        product_lines = []
-        for p in products:
-            sale_tag = (
-                " **[FINAL SALE - Non-Returnable per POL-RET-02]**"
-                if p.get("final_sale")
-                else f" *(Standard {STANDARD_RETURN_WINDOW_DAYS}-day return eligible)*"
-            )
-            in_stock_str = ", ".join(p["sizes_in_stock"])
-            out_stock_str = ", ".join(p["sizes_out_of_stock"]) if p["sizes_out_of_stock"] else "None"
-            product_lines.append(
-                f"- **{p['name']} (`{p['product_id']}`)** — **${p['price']:.2f}**{sale_tag}\n"
-                f"  - *Sizes in stock:* {in_stock_str} (Out of stock: {out_stock_str})\n"
-                f"  - *Fit Guide:* {p['fit_guide']}\n"
-                f"  - *Fabric & Care:* {p['fabric_and_care']}"
-            )
-        draft = f"Here are the matching {BRAND_NAME} product details:\n" + "\n".join(product_lines)
+        draft = (
+            f"I'm the **{BRAND_NAME} Customer Support Agent**. To make sure I give you the right information, "
+            f"could you clarify what you need help with?\n"
+            f"- **For an existing order (tracking, return/refund, or cancellation):** Please share your **Order ID** (e.g., `ORD-1001`) and the **email address** on the order so I can verify your account first.\n"
+            f"- **For product or policy questions:** Ask about a specific item (like our *Classic Cotton T-Shirt* or *Metro Fleece Zip Hoodie*) or our **7-day return policy (`POL-RET-01`)**."
+        )
         return self._finalize_response(
             user_message=user_message,
             draft_reply=draft,
-            decision_type=DECISION_ANSWER,
+            decision_type=DECISION_CLARIFY,
             authenticated_email=extracted_email,
         )
 

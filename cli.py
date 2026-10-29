@@ -14,13 +14,15 @@ def _print_reference_guide(agent: CustomerSupportAgent) -> None:
             f"status={o['status']} | ${o['total_amount']:.2f} | {item_names}{req_note}"
         )
     print("\n--- Interactive Chat Commands ---")
-    print("  /orders    : Show live SQLite orders table")
-    print("  /products  : Show UrbanThread product catalog")
-    print("  /policies  : Show store policies (7-day return rule, Final Sale, VIP Gold)")
-    print("  /fail on   : Simulate SQLite 503 database outage (Failure #5)")
-    print("  /fail off  : Restore normal SQLite database operation")
-    print("  /reset     : Reset SQLite database and multi-turn session memory")
-    print("  exit       : Quit interactive chat")
+    print("  /verify <email> [order_id] : Verify customer identity upfront (e.g., /verify alice@example.com ORD-1001)")
+    print("  /whoami                    : Show currently verified customer session")
+    print("  /logout                    : Clear verified customer session")
+    print("  /orders                    : Show live SQLite orders table")
+    print("  /products                  : Show UrbanThread product catalog")
+    print("  /policies                  : Show store policies (7-day return rule, Final Sale, VIP Gold)")
+    print("  /fail on | /fail off       : Toggle simulated SQLite 503 database outage (Failure #5)")
+    print("  /reset                     : Reset SQLite database and multi-turn session memory")
+    print("  exit                       : Quit interactive chat")
     print("-" * 76)
 
 
@@ -54,9 +56,24 @@ def run_interactive(backend: str, use_live_llm: bool) -> None:
     print("=" * 76)
     _print_reference_guide(agent)
 
+    try:
+        init_auth = input(
+            "\n[Optional Step 1] Verify Customer Email (e.g. alice@example.com, or press Enter to start unverified): "
+        ).strip()
+        if init_auth:
+            parts = init_auth.split()
+            email_arg = parts[0]
+            ord_arg = parts[1] if len(parts) > 1 else None
+            ok, msg = agent.verify_customer_session(email_arg, ord_arg)
+            print(f"[{'VERIFIED' if ok else 'UNVERIFIED'}] {msg}")
+    except (EOFError, KeyboardInterrupt):
+        print("\nExiting chat.")
+        return
+
     while True:
         try:
-            user_input = input("\nCustomer: ").strip()
+            session_badge = f" ({agent.session_email})" if agent.session_email else " (unverified)"
+            user_input = input(f"\nCustomer{session_badge}: ").strip()
         except (EOFError, KeyboardInterrupt):
             print("\nExiting chat.")
             break
@@ -70,6 +87,26 @@ def run_interactive(backend: str, use_live_llm: bool) -> None:
             agent.store.reset()
             agent.reset_session()
             print("[SQLite database and multi-turn session memory reset.]")
+            continue
+        if cmd.startswith("/verify "):
+            parts = user_input.split()
+            if len(parts) >= 2:
+                email_arg = parts[1]
+                ord_arg = parts[2] if len(parts) >= 3 else None
+                ok, msg = agent.verify_customer_session(email_arg, ord_arg)
+                print(f"[{'VERIFIED' if ok else 'ERROR'}] {msg}")
+            else:
+                print("Usage: /verify <email> [order_id]")
+            continue
+        if cmd == "/whoami":
+            if agent.session_email:
+                print(f"[Verified Session] email={agent.session_email} | active_order={agent.session_order_id}")
+            else:
+                print("[Unverified Session] Use '/verify <email> [order_id]' or provide Order ID + email in chat.")
+            continue
+        if cmd == "/logout":
+            agent.reset_session()
+            print("[Logged out of customer session. Now unverified.]")
             continue
         if cmd == "/orders":
             _print_reference_guide(agent)

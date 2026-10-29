@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import re
 import sqlite3
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -322,19 +323,44 @@ class DataStore:
     def query_products(self, query: str = "") -> List[Dict[str, Any]]:
         self.check_health()
         all_prods = self.products
-        q = (query or "").strip().lower()
+        spaced = re.sub(r"([a-z])([A-Z])", r"\1 \2", query or "")
+        q = spaced.strip().lower()
         if not q or q in ("all", "catalog", "products"):
             return all_prods
 
-        tokens = [t for t in q.replace("-", " ").split() if len(t) > 1]
-        matches = []
         for p in all_prods:
-            haystack = (
-                f"{p['product_id']} {p['name']} {p['category']} {p['description']} {p['fabric_and_care']}"
-            ).lower()
-            if q in haystack or any(tok in haystack for tok in tokens):
-                matches.append(p)
-        return matches or all_prods
+            if p["product_id"].lower() in q or p["name"].lower() in q:
+                return [p]
+
+        stopwords = {
+            "what", "is", "this", "that", "the", "a", "an", "in", "on", "of", "for", "to",
+            "and", "or", "how", "do", "you", "have", "sell", "buy", "want", "wanna", "like",
+            "please", "tell", "me", "suggest", "recommend", "need", "good", "best", "size",
+            "sizes", "stock", "available", "price", "cost", "much", "wash", "care", "fit",
+            "does", "it", "should", "can", "i", "my", "purchase", "order", "yes", "ok",
+        }
+        raw_tokens = re.findall(r"[a-z0-9]+", q)
+        tokens = [t for t in raw_tokens if len(t) > 2 and t not in stopwords]
+
+        scored: List[Tuple[int, Dict[str, Any]]] = []
+        for p in all_prods:
+            name_cat = f"{p['product_id']} {p['name']} {p['category']}".lower()
+            desc_care = f"{p['description']} {p['fabric_and_care']}".lower()
+            score = 0
+            for tok in tokens:
+                if tok in name_cat:
+                    score += 3
+                elif tok in desc_care:
+                    score += 1
+            if score > 0:
+                scored.append((score, p))
+
+        if scored:
+            scored.sort(key=lambda item: item[0], reverse=True)
+            top_score = scored[0][0]
+            return [p for sc, p in scored if sc >= max(2, top_score - 1)]
+
+        return all_prods
 
     def query_policies(self, topic: str = "all") -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
         self.check_health()
@@ -363,6 +389,24 @@ class DataStore:
             if t in p["topic"].lower() or t in p["title"].lower() or t in p["rule"].lower()
         ]
         return (filtered or all_policies), conflicts
+
+    def get_customer_by_email(self, email: str) -> Optional[Dict[str, Any]]:
+        self.check_health()
+        norm_email = email.strip().lower()
+        row = self.conn.execute(
+            "SELECT * FROM customers WHERE LOWER(email) = ?",
+            (norm_email,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def get_orders_by_email(self, email: str) -> List[Dict[str, Any]]:
+        self.check_health()
+        norm_email = email.strip().lower()
+        rows = self.conn.execute(
+            "SELECT * FROM orders WHERE LOWER(customer_email) = ? ORDER BY order_id",
+            (norm_email,),
+        ).fetchall()
+        return [self._hydrate_order(r) for r in rows]
 
     def get_order_by_id(self, order_id: str) -> Optional[Dict[str, Any]]:
         self.check_health()
