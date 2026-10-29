@@ -77,9 +77,18 @@ Key security properties (each covered by a test):
 ## Setup & Execution Instructions
 
 ### 1. Environment Configuration
+Requires Python 3.10+ only; no `pip install` is needed.
 ```bash
 cp .env.example .env
 ```
+
+| Mode | Setup | Run |
+|---|---|---|
+| Deterministic (default) | nothing | `python cli.py` |
+| LLM agent via Claude Code CLI | install and log in to `claude` (no API key) | `python cli.py --backend claude_code --live-llm` |
+| LLM agent via OpenAI | set `OPENAI_API_KEY` in `.env` | `python cli.py --backend openai --live-llm` |
+
+If the chosen LLM is unavailable, the agent falls back to the deterministic engine, so it always runs.
 
 ### 2. Run the 8-Scenario Demo Walkthrough
 ```bash
