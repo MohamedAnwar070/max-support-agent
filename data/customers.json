@@ -1,0 +1,35 @@
+[
+  {
+    "customer_id": "CUST-101",
+    "name": "Alice Vance",
+    "email": "alice@example.com",
+    "loyalty_tier": "VIP_GOLD",
+    "joined_date": "2024-03-15",
+    "phone": "+1-555-0101"
+  },
+  {
+    "customer_id": "CUST-102",
+    "name": "Bob Miller",
+    "email": "bob@example.com",
+    "loyalty_tier": "STANDARD",
+    "joined_date": "2025-07-22",
+    "phone": "+1-555-0102"
+  },
+  {
+    "customer_id": "CUST-103",
+    "name": "Clara Chen",
+    "email": "clara@example.com",
+    "loyalty_tier": "STANDARD",
+    "joined_date": "2025-11-04",
+    "phone": "+1-555-0103"
+  },
+  {
+    "customer_id": "CUST-104",
+    "name": "Marcus Sterling",
+    "email": "marcus@example.com",
+    "loyalty_tier": "VIP_GOLD",
+    "joined_date": "2023-09-10",
+    "phone": "+1-555-0104"
+  }
+]
+

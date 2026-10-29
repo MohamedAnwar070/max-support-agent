@@ -1,0 +1,135 @@
+[
+  {
+    "order_id": "ORD-1001",
+    "customer_id": "CUST-101",
+    "customer_email": "alice@example.com",
+    "customer_name": "Alice Vance",
+    "loyalty_tier": "VIP_GOLD",
+    "status": "delivered",
+    "order_date": "2026-10-15",
+    "delivery_date": "2026-10-19",
+    "days_since_delivery": 10,
+    "shipping_city": "Seattle, WA",
+    "tracking_number": "1Z999AA10111111101",
+    "total_amount": 89.00,
+    "items": [
+      {
+        "product_id": "PROD-003",
+        "name": "Archive Velvet Evening Blazer (Final Sale)",
+        "size": "M",
+        "quantity": 1,
+        "unit_price": 89.00,
+        "final_sale": true
+      }
+    ],
+    "active_return_id": null,
+    "cancellation_id": null
+  },
+  {
+    "order_id": "ORD-1002",
+    "customer_id": "CUST-102",
+    "customer_email": "bob@example.com",
+    "customer_name": "Bob Miller",
+    "loyalty_tier": "STANDARD",
+    "status": "shipped",
+    "order_date": "2026-10-26",
+    "delivery_date": null,
+    "days_since_delivery": null,
+    "estimated_delivery": "2026-10-31",
+    "shipping_city": "Austin, TX",
+    "tracking_number": "1Z999AA10222222202",
+    "total_amount": 118.00,
+    "items": [
+      {
+        "product_id": "PROD-001",
+        "name": "CloudKnit Merino Hoodie",
+        "size": "L",
+        "quantity": 1,
+        "unit_price": 118.00,
+        "final_sale": false
+      }
+    ],
+    "active_return_id": null,
+    "cancellation_id": null
+  },
+  {
+    "order_id": "ORD-1003",
+    "customer_id": "CUST-103",
+    "customer_email": "clara@example.com",
+    "customer_name": "Clara Chen",
+    "loyalty_tier": "STANDARD",
+    "status": "return_initiated",
+    "order_date": "2026-10-17",
+    "delivery_date": "2026-10-21",
+    "days_since_delivery": 8,
+    "shipping_city": "Chicago, IL",
+    "tracking_number": "1Z999AA10333333303",
+    "total_amount": 74.00,
+    "items": [
+      {
+        "product_id": "PROD-004",
+        "name": "FlexCore Seamless High-Rise Leggings",
+        "size": "M",
+        "quantity": 1,
+        "unit_price": 74.00,
+        "final_sale": false
+      }
+    ],
+    "active_return_id": "RET-8801",
+    "return_created_at": "2026-10-28T14:20:00Z",
+    "cancellation_id": null
+  },
+  {
+    "order_id": "ORD-1004",
+    "customer_id": "CUST-103",
+    "customer_email": "clara@example.com",
+    "customer_name": "Clara Chen",
+    "loyalty_tier": "STANDARD",
+    "status": "processing",
+    "order_date": "2026-10-29",
+    "delivery_date": null,
+    "days_since_delivery": null,
+    "shipping_city": "Chicago, IL",
+    "tracking_number": null,
+    "total_amount": 165.00,
+    "items": [
+      {
+        "product_id": "PROD-002",
+        "name": "AeroStride Carbon Running Jacket",
+        "size": "M",
+        "quantity": 1,
+        "unit_price": 165.00,
+        "final_sale": false
+      }
+    ],
+    "active_return_id": null,
+    "cancellation_id": null
+  },
+  {
+    "order_id": "ORD-1005",
+    "customer_id": "CUST-104",
+    "customer_email": "marcus@example.com",
+    "customer_name": "Marcus Sterling",
+    "loyalty_tier": "VIP_GOLD",
+    "status": "delivered",
+    "order_date": "2026-10-20",
+    "delivery_date": "2026-10-24",
+    "days_since_delivery": 5,
+    "shipping_city": "New York, NY",
+    "tracking_number": "1Z999AA10555555505",
+    "total_amount": 118.00,
+    "items": [
+      {
+        "product_id": "PROD-001",
+        "name": "CloudKnit Merino Hoodie",
+        "size": "M",
+        "quantity": 1,
+        "unit_price": 118.00,
+        "final_sale": false
+      }
+    ],
+    "active_return_id": null,
+    "cancellation_id": null
+  }
+]
+

@@ -1,0 +1,15 @@
+# Customer-Support Agent for an Apparel Company — Candidate Task
+
+**Build from scratch; do not reuse existing projects or previous work. You may use any AI tools.**
+
+1. **Write a short PRD:** customer needs, scope, assumptions and success criteria.
+
+2. **Create fictional data:** products, policies, customers and orders. No real customer data or transactions.
+
+3. **Build a working agent:** answer a variety of customer questions (using your own judgment) to mock real life scenarios. Clarify or escalate to human beings when information is missing or an action is unsafe.
+
+4. **Test six failure types:** missing information, conflicting policies, unauthorised order access, prompt injection, tool failure and duplicate requests. Show expected versus actual results.
+
+5. **Write repeatable agent evals:** include pass/fail criteria, run instructions and results.
+
+6. **Within one hour, submit a ZIP to hiring@gomaxify.ai containing the PRD, data, code, tests, evals and setup README. Exclude credentials.
