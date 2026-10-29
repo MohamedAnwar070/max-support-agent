@@ -48,7 +48,6 @@ def get_settings() -> Settings:
         openai_model=os.environ.get("OPENAI_MODEL", DEFAULT_OPENAI_MODEL).strip(),
         claude_cli_path=os.environ.get("CLAUDE_CLI_PATH", "").strip() or None,
         llm_timeout_sec=int(os.environ.get("LLM_TIMEOUT_SEC", str(DEFAULT_LLM_TIMEOUT_SEC))),
-        data_dir=Path(os.environ.get("SUNNYSTEP_DATA_DIR", str(DATA_DIR))),
-        sqlite_db_path=Path(os.environ.get("SUNNYSTEP_SQLITE_DB", str(SQLITE_DB_PATH))),
+        data_dir=Path(os.environ.get("URBANTHREAD_DATA_DIR", str(DATA_DIR))),
+        sqlite_db_path=Path(os.environ.get("URBANTHREAD_SQLITE_DB", str(SQLITE_DB_PATH))),
     )
-

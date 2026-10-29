@@ -24,7 +24,9 @@ from .constants import (
     ORDER_STATUS_PHRASES,
     POLICY_QUESTION_PHRASES,
     PRODUCT_INQUIRY_KEYWORDS,
+    REQUEST_KEY_PATTERN,
     RETURN_KEYWORDS,
+    STANDARD_RETURN_WINDOW_DAYS,
     STATUS_BLOCKED,
     STATUS_CONFLICT,
     STATUS_DENIED,
@@ -75,9 +77,10 @@ class CustomerSupportAgent:
         message: str,
         context_email: Optional[str] = None,
         context_order_id: Optional[str] = None,
-    ) -> Tuple[Optional[str], Optional[str]]:
+    ) -> Tuple[Optional[str], Optional[str], Optional[str]]:
         order_match = ORDER_ID_PATTERN.search(message)
         email_match = EMAIL_PATTERN.search(message)
+        req_key_match = REQUEST_KEY_PATTERN.search(message)
 
         order_id = (
             order_match.group(1).upper()
@@ -89,7 +92,8 @@ class CustomerSupportAgent:
             if email_match
             else (context_email.lower() if context_email else None)
         )
-        return order_id, email
+        request_key = req_key_match.group(1).upper() if req_key_match else None
+        return order_id, email, request_key
 
     @staticmethod
     def _classify_intent(message: str) -> str:
@@ -161,7 +165,7 @@ class CustomerSupportAgent:
         is_injected, injection_rule = detect_prompt_injection(user_message)
         if is_injected:
             reply = (
-                f"I cannot fulfill instructions to override system rules, enter developer/admin mode, "
+                f"I cannot fulfill instructions that attempt to override system rules, enter developer/admin mode, "
                 f"expose customer records, or issue unverified refunds. I can only assist with legitimate "
                 f"{BRAND_NAME} product, policy, and verified order inquiries."
             )
@@ -177,7 +181,9 @@ class CustomerSupportAgent:
                 metadata={"guardrail_triggered": injection_rule},
             )
 
-        extracted_order_id, extracted_email = self._extract_entities(user_message, customer_email, order_id)
+        extracted_order_id, extracted_email, extracted_req_key = self._extract_entities(
+            user_message, customer_email, order_id
+        )
         is_unsafe, unsafe_rule = detect_unsafe_request(user_message)
         if is_unsafe:
             self.toolkit.escalate_to_human(
@@ -238,8 +244,8 @@ class CustomerSupportAgent:
                     missing_parts.append("the **email address** used to place the order")
                 missing_str = " and ".join(missing_parts)
                 draft = (
-                    f"I would be happy to help you {action} your {BRAND_NAME} order, but I need a bit more information first. "
-                    f"Could you please provide {missing_str} so I can verify your account and check eligibility?"
+                    f"To help you {action} your {BRAND_NAME} order and process a mock refund, I need a targeted clarification first: "
+                    f"could you please provide {missing_str} so I can verify ownership and eligibility?"
                 )
                 return self._finalize_response(
                     user_message=user_message,
@@ -253,6 +259,7 @@ class CustomerSupportAgent:
                 customer_email=extracted_email,
                 action=action,
                 reason=user_message,
+                request_key=extracted_req_key,
             )
             status = res.get("status")
 
@@ -267,10 +274,9 @@ class CustomerSupportAgent:
                 ticket = self.toolkit.last_escalation
                 ticket_id = ticket.ticket_id if ticket else "ESC-9001"
                 draft = (
-                    f"I apologize, but our order fulfillment database is currently experiencing a temporary service outage "
-                    f"(Error 503) and I cannot complete or verify your {action} request for `{extracted_order_id}` right now. "
-                    f"To ensure this is handled promptly without any delay to your eligibility window, I have escalated your request "
-                    f"to a Human Support Specialist under Ticket **{ticket_id}**."
+                    f"Your {action} and refund request for `{extracted_order_id}` **could not be verified** due to a temporary "
+                    f"backend database outage (Error 503), so I cannot claim or confirm that the action succeeded. "
+                    f"I have escalated your request to a Human Support Specialist under Ticket **{ticket_id}** to verify and complete it safely."
                 )
                 return self._finalize_response(
                     user_message=user_message,
@@ -282,9 +288,8 @@ class CustomerSupportAgent:
 
             if status == STATUS_BLOCKED and res.get("code") == CODE_UNAUTHORIZED:
                 draft = (
-                    f"I cannot view or {action} order `{extracted_order_id}` because the email address `{extracted_email}` "
-                    f"does not match the customer email associated with that order. For security and privacy reasons, "
-                    f"no order details or changes can be processed."
+                    f"Access denied: I cannot view or {action} order `{extracted_order_id}` because the email address "
+                    f"`{extracted_email}` does not match the customer record for that order. No order details or changes can be disclosed."
                 )
                 return self._finalize_response(
                     user_message=user_message,
@@ -310,12 +315,11 @@ class CustomerSupportAgent:
                 ticket = self.toolkit.last_escalation
                 ticket_id = ticket.ticket_id if ticket else "ESC-9001"
                 draft = (
-                    f"I reviewed your order `{extracted_order_id}` for the **Sunnystep Archive Velvet Blazer (Final Sale)** "
-                    f"under your `VIP_GOLD` membership, and detected a direct conflict between two store policies:\n"
-                    f"- **Clearance & Final Sale Policy (`POL-RET-02`)** states that Final Sale items are strictly non-returnable under any circumstances with no exceptions for any tier.\n"
-                    f"- **VIP Gold Loyalty Policy (`POL-VIP-01`)** states that `VIP_GOLD` members receive a 60-day return guarantee on all purchases, including Final Sale items.\n\n"
-                    f"Rather than guessing or making an unauthorized decision, I have escalated your request to a Human Support Specialist "
-                    f"under Ticket **{ticket_id}** to review and resolve this for you."
+                    f"I reviewed order `{extracted_order_id}` for the **Archive Distressed Denim Jacket (Final Sale)** "
+                    f"under your `VIP_GOLD` membership and found a direct conflict between two store policies:\n"
+                    f"- **Clearance & Final Sale Policy (`POL-RET-02`)** states that Final Sale items are strictly non-returnable with no exceptions for any tier.\n"
+                    f"- **VIP Gold Loyalty Policy (`POL-VIP-01`)** states that `VIP_GOLD` members receive a 14-day return and refund guarantee on all purchases, including Final Sale items.\n\n"
+                    f"Rather than guessing, I have escalated your request to a Human Support Specialist under Ticket **{ticket_id}** for resolution."
                 )
                 return self._finalize_response(
                     user_message=user_message,
@@ -327,10 +331,12 @@ class CustomerSupportAgent:
 
             if status == STATUS_DUPLICATE and res.get("code") == CODE_DUPLICATE:
                 ref_id = res.get("reference_id")
+                req_key = res.get("request_key")
+                refund_amt = res.get("refund_amount", 0.0)
                 draft = (
-                    f"A {action} request for order `{extracted_order_id}` has already been submitted and is active under "
-                    f"reference ID **{ref_id}**. Our SQLite idempotency check prevented a duplicate {action} or double refund from being created. "
-                    f"Your existing request **{ref_id}** remains in progress."
+                    f"This {action} request for order `{extracted_order_id}` was already processed under unique request key "
+                    f"**`{req_key}`**. Returning the original action result without repeating the action: "
+                    f"Confirmation Reference **{ref_id}** (Mock Refund: **${refund_amt:.2f}**)."
                 )
                 return self._finalize_response(
                     user_message=user_message,
@@ -358,11 +364,12 @@ class CustomerSupportAgent:
                 )
 
             ref_id = res.get("reference_id")
+            req_key = res.get("request_key")
             refund = res.get("refund_amount", 0.0)
             draft = (
-                f"Your {action} request for order `{extracted_order_id}` has been processed! "
-                f"Your confirmation reference is **{ref_id}**, and a refund of **${refund:.2f}** will be credited "
-                f"to your original payment method within 5–7 business days."
+                f"Your {action} and mock refund for order `{extracted_order_id}` have been processed! "
+                f"Reference ID: **{ref_id}** | Unique Request Key: **`{req_key}`** | "
+                f"Mock Refund Amount: **${refund:.2f}** (credited to your original payment method within 3–5 business days)."
             )
             return self._finalize_response(
                 user_message=user_message,
@@ -379,8 +386,8 @@ class CustomerSupportAgent:
                 if not extracted_email:
                     missing_parts.append("your **email address**")
                 draft = (
-                    f"I can check your {BRAND_NAME} order status right away! Please provide {' and '.join(missing_parts)} "
-                    f"so I can verify and look up your order."
+                    f"To check your {BRAND_NAME} order status, could you please provide {' and '.join(missing_parts)} "
+                    f"so I can verify ownership and look up your order?"
                 )
                 return self._finalize_response(
                     user_message=user_message,
@@ -403,10 +410,8 @@ class CustomerSupportAgent:
                 ticket = self.toolkit.last_escalation
                 ticket_id = ticket.ticket_id if ticket else "ESC-9001"
                 draft = (
-                    f"I apologize, but our order tracking database is currently unreachable (Error 503), so I cannot "
-                    f"retrieve the live status for `{extracted_order_id}` right now. I have escalated your inquiry to "
-                    f"a Human Support Specialist under Ticket **{ticket_id}** who will "
-                    f"send your tracking update as soon as service is restored."
+                    f"The status for order `{extracted_order_id}` **could not be verified** due to a temporary database outage (Error 503). "
+                    f"I have escalated your inquiry to a Human Support Specialist under Ticket **{ticket_id}**."
                 )
                 return self._finalize_response(
                     user_message=user_message,
@@ -419,7 +424,7 @@ class CustomerSupportAgent:
             if status == STATUS_BLOCKED and res.get("code") == CODE_UNAUTHORIZED:
                 draft = (
                     f"Access denied: The email address `{extracted_email}` is not authorized to access order `{extracted_order_id}`. "
-                    f"To protect customer privacy, I cannot share any details about this order."
+                    f"No order details can be exposed."
                 )
                 return self._finalize_response(
                     user_message=user_message,
@@ -476,7 +481,7 @@ class CustomerSupportAgent:
                 topic = "cancellations"
             elif "vip" in text_lower or "final sale" in text_lower:
                 topic = "all"
-            elif "return" in text_lower or "exchange" in text_lower:
+            elif "return" in text_lower or "exchange" in text_lower or "refund" in text_lower:
                 topic = "returns"
 
             res = self.toolkit.lookup_policies(topic=topic)
@@ -489,7 +494,7 @@ class CustomerSupportAgent:
                 ticket = self.toolkit.last_escalation
                 ticket_id = ticket.ticket_id if ticket else "ESC-9001"
                 draft = (
-                    f"I apologize, but our policy database is temporarily unavailable. "
+                    f"Policy details could not be verified because our policy database is temporarily unavailable. "
                     f"I have escalated your question to a Human Specialist under Ticket **{ticket_id}**."
                 )
                 return self._finalize_response(
@@ -510,10 +515,10 @@ class CustomerSupportAgent:
                 ticket = self.toolkit.last_escalation
                 ticket_id = ticket.ticket_id if ticket else "ESC-9001"
                 draft = (
-                    "There is currently a conflict between two of our official policies regarding Final Sale items for VIP Gold members:\n"
+                    "There is a direct conflict between two of our official policies regarding Final Sale items for VIP Gold members:\n"
                     "- **`POL-RET-02` (Clearance & Final Sale Policy):** States Final Sale items are strictly non-returnable with no exceptions for any tier.\n"
-                    "- **`POL-VIP-01` (VIP Gold Guarantee):** States VIP Gold members receive a 60-day return window on all items, including Final Sale items.\n\n"
-                    f"Because these two policies conflict, I have escalated your inquiry to a Human Support Specialist under Ticket **{ticket_id}** to confirm eligibility for your specific purchase."
+                    "- **`POL-VIP-01` (VIP Gold Guarantee):** States VIP Gold members receive a 14-day return and refund window on all items, including Final Sale items.\n\n"
+                    f"Rather than guessing, I have escalated your inquiry to a Human Support Specialist under Ticket **{ticket_id}**."
                 )
                 return self._finalize_response(
                     user_message=user_message,
@@ -543,7 +548,7 @@ class CustomerSupportAgent:
             ticket = self.toolkit.last_escalation
             ticket_id = ticket.ticket_id if ticket else "ESC-9001"
             draft = (
-                f"I apologize, our product catalog database is currently unavailable. "
+                f"Product availability could not be verified because our catalog database is temporarily unavailable. "
                 f"I have created Escalation Ticket **{ticket_id}** for a specialist to assist you."
             )
             return self._finalize_response(
@@ -557,7 +562,11 @@ class CustomerSupportAgent:
         products = res.get("products", [])
         product_lines = []
         for p in products:
-            sale_tag = " **[FINAL SALE - Non-Returnable per POL-RET-02]**" if p.get("final_sale") else " *(Standard 30-day return eligible)*"
+            sale_tag = (
+                " **[FINAL SALE - Non-Returnable per POL-RET-02]**"
+                if p.get("final_sale")
+                else f" *(Standard {STANDARD_RETURN_WINDOW_DAYS}-day return eligible)*"
+            )
             in_stock_str = ", ".join(p["sizes_in_stock"])
             out_stock_str = ", ".join(p["sizes_out_of_stock"]) if p["sizes_out_of_stock"] else "None"
             product_lines.append(

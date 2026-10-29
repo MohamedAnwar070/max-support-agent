@@ -103,7 +103,7 @@ class SupportToolkit:
                 "status": STATUS_ERROR,
                 "code": CODE_TOOL_ERROR,
                 "message": str(exc),
-                "required_action": "Escalate via escalate_to_human without fabricating order status.",
+                "required_action": "Report that the action could not be verified; do not claim success.",
             }
             self.call_history.append(ToolCallRecord("get_order_status", args, STATUS_ERROR, res))
             return res
@@ -142,15 +142,22 @@ class SupportToolkit:
         customer_email: str = "",
         action: str = "return",
         reason: str = "",
+        request_key: Optional[str] = None,
     ) -> Dict[str, Any]:
         norm_action = (action or "return").strip().lower()
         if norm_action not in ("return", "cancel"):
             norm_action = "return"
+        effective_request_key = (
+            request_key.strip().upper()
+            if request_key and request_key.strip()
+            else f"REQ-{order_id.strip().upper()}-{norm_action.upper()}"
+        )
         args = {
             "order_id": order_id,
             "customer_email": customer_email,
             "action": norm_action,
             "reason": reason,
+            "request_key": effective_request_key,
         }
 
         if not order_id or not order_id.strip() or not customer_email or not customer_email.strip():
@@ -175,7 +182,7 @@ class SupportToolkit:
                 "status": STATUS_ERROR,
                 "code": CODE_TOOL_ERROR,
                 "message": str(exc),
-                "required_action": "Escalate via escalate_to_human due to SQLite database error.",
+                "required_action": "Report that the action could not be verified and do not claim success. Escalate via escalate_to_human.",
             }
             self.call_history.append(ToolCallRecord("process_return_or_cancel", args, STATUS_ERROR, res))
             return res
@@ -199,17 +206,21 @@ class SupportToolkit:
             return res
 
         idempotency_key = f"{order['order_id'].upper()}:{norm_action}"
-        existing = self.store.get_idempotency_record(idempotency_key)
+        existing = self.store.get_idempotency_record(idempotency_key, effective_request_key)
         if existing:
             res = {
                 "status": STATUS_DUPLICATE,
                 "code": CODE_DUPLICATE,
                 "reference_id": existing["reference_id"],
+                "request_key": existing["request_key"],
+                "refund_amount": existing["refund_amount"],
                 "order_id": order["order_id"],
                 "action": norm_action,
+                "original_status": existing["status"],
                 "message": (
-                    f"Idempotency guard triggered: A {norm_action} request for order {order['order_id']} "
-                    f"has already been processed under reference ID {existing['reference_id']}."
+                    f"Duplicate request detected for request_key '{existing['request_key']}'. "
+                    f"Returning original action result ({existing['reference_id']}, mock refund ${existing['refund_amount']:.2f}) "
+                    "without repeating the action."
                 ),
             }
             self.call_history.append(ToolCallRecord("process_return_or_cancel", args, STATUS_DUPLICATE, res))
@@ -229,8 +240,8 @@ class SupportToolkit:
                     "item_names": [i["name"] for i in order["items"]],
                     "message": (
                         "POLICY CONFLICT DETECTED between POL-RET-02 (Final Sale strictly non-returnable) "
-                        "and POL-VIP-01 (VIP Gold 60-day return guarantee includes Final Sale items). "
-                        "Escalate via escalate_to_human."
+                        "and POL-VIP-01 (VIP Gold 14-day return guarantee includes Final Sale items). "
+                        "Escalate without guessing via escalate_to_human."
                     ),
                 }
                 self.call_history.append(ToolCallRecord("process_return_or_cancel", args, STATUS_CONFLICT, res))
@@ -261,22 +272,29 @@ class SupportToolkit:
                 res = {
                     "status": STATUS_DENIED,
                     "code": "RETURN_WINDOW_EXPIRED",
-                    "message": f"Order was delivered {days_elapsed} days ago, exceeding the {max_days}-day return window.",
+                    "message": f"Order was delivered {days_elapsed} days ago, exceeding the {max_days}-day return policy window.",
                 }
                 self.call_history.append(ToolCallRecord("process_return_or_cancel", args, STATUS_DENIED, res))
                 return res
 
             return_id = self.store.next_return_id()
-            self.store.record_return(order["order_id"], return_id, idempotency_key)
+            self.store.record_return(
+                order["order_id"],
+                return_id,
+                idempotency_key,
+                effective_request_key,
+                order["total_amount"],
+            )
             res = {
                 "status": STATUS_SUCCESS,
                 "action": "return",
                 "reference_id": return_id,
+                "request_key": effective_request_key,
                 "order_id": order["order_id"],
                 "refund_amount": order["total_amount"],
                 "message": (
-                    f"Return initiated for order {order['order_id']} under RMA {return_id}. "
-                    f"Refund of ${order['total_amount']:.2f} will process within 5-7 business days."
+                    f"Mock refund and return processed for order {order['order_id']} under reference {return_id} "
+                    f"(request_key: {effective_request_key}). Refund of ${order['total_amount']:.2f} will process within 3-5 business days."
                 ),
             }
             self.call_history.append(ToolCallRecord("process_return_or_cancel", args, STATUS_SUCCESS, res))
@@ -296,16 +314,23 @@ class SupportToolkit:
             return res
 
         cancel_id = self.store.next_cancel_id()
-        self.store.record_cancellation(order["order_id"], cancel_id, idempotency_key)
+        self.store.record_cancellation(
+            order["order_id"],
+            cancel_id,
+            idempotency_key,
+            effective_request_key,
+            order["total_amount"],
+        )
         res = {
             "status": STATUS_SUCCESS,
             "action": "cancel",
             "reference_id": cancel_id,
+            "request_key": effective_request_key,
             "order_id": order["order_id"],
             "refund_amount": order["total_amount"],
             "message": (
-                f"Order {order['order_id']} cancelled under reference {cancel_id}. "
-                f"Full refund of ${order['total_amount']:.2f} issued."
+                f"Order {order['order_id']} cancelled under reference {cancel_id} "
+                f"(request_key: {effective_request_key}). Full mock refund of ${order['total_amount']:.2f} issued."
             ),
         }
         self.call_history.append(ToolCallRecord("process_return_or_cancel", args, STATUS_SUCCESS, res))

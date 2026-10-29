@@ -53,7 +53,6 @@ class DataStore:
         self._cancel_counter = INITIAL_CANCEL_COUNTER
 
         with self.conn:
-            self.conn.executescript(SQLITE_SCHEMA_DDL)
             for table in (
                 "order_items",
                 "orders",
@@ -64,7 +63,8 @@ class DataStore:
                 "idempotency_ledger",
                 "escalations",
             ):
-                self.conn.execute(f"DELETE FROM {table}")
+                self.conn.execute(f"DROP TABLE IF EXISTS {table}")
+            self.conn.executescript(SQLITE_SCHEMA_DDL)
 
             for p in self._raw_products:
                 self.conn.execute(
@@ -149,8 +149,8 @@ class DataStore:
                         order_id, customer_id, customer_email, customer_name, loyalty_tier,
                         status, order_date, delivery_date, days_since_delivery,
                         estimated_delivery, shipping_city, tracking_number, total_amount,
-                        active_return_id, cancellation_id
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        active_return_id, cancellation_id, request_key
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         o["order_id"],
@@ -168,6 +168,7 @@ class DataStore:
                         o["total_amount"],
                         o.get("active_return_id"),
                         o.get("cancellation_id"),
+                        o.get("request_key"),
                     ),
                 )
                 for item in o.get("items", []):
@@ -188,33 +189,39 @@ class DataStore:
                         ),
                     )
                 if o.get("active_return_id"):
+                    req_key = o.get("request_key") or f"REQ-{o['order_id'].upper()}-RETURN"
                     self.conn.execute(
                         """
                         INSERT INTO idempotency_ledger (
-                            idempotency_key, reference_id, action, order_id, status, created_at
-                        ) VALUES (?, ?, ?, ?, ?, ?)
+                            idempotency_key, request_key, reference_id, action, order_id, refund_amount, status, created_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             f"{o['order_id'].upper()}:return",
+                            req_key,
                             o["active_return_id"],
                             "return",
                             o["order_id"],
+                            o["total_amount"],
                             o["status"],
                             o.get("return_created_at", "2026-10-28T14:20:00Z"),
                         ),
                     )
                 if o.get("cancellation_id"):
+                    req_key = o.get("request_key") or f"REQ-{o['order_id'].upper()}-CANCEL"
                     self.conn.execute(
                         """
                         INSERT INTO idempotency_ledger (
-                            idempotency_key, reference_id, action, order_id, status, created_at
-                        ) VALUES (?, ?, ?, ?, ?, ?)
+                            idempotency_key, request_key, reference_id, action, order_id, refund_amount, status, created_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             f"{o['order_id'].upper()}:cancel",
+                            req_key,
                             o["cancellation_id"],
                             "cancel",
                             o["order_id"],
+                            o["total_amount"],
                             o["status"],
                             "2026-10-28T14:20:00Z",
                         ),
@@ -232,7 +239,7 @@ class DataStore:
 
     def next_return_id(self) -> str:
         self._return_counter += 1
-        return f"RET-{self._return_counter}"
+        return f"REF-{self._return_counter}"
 
     def next_cancel_id(self) -> str:
         self._cancel_counter += 1
@@ -288,6 +295,7 @@ class DataStore:
             "total_amount": row["total_amount"],
             "active_return_id": row["active_return_id"],
             "cancellation_id": row["cancellation_id"],
+            "request_key": row["request_key"],
             "items": items,
         }
 
@@ -365,46 +373,70 @@ class DataStore:
         ).fetchone()
         return self._hydrate_order(row) if row else None
 
-    def get_idempotency_record(self, idempotency_key: str) -> Optional[Dict[str, Any]]:
+    def get_idempotency_record(
+        self,
+        idempotency_key: str,
+        request_key: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
         self.check_health()
-        row = self.conn.execute(
-            "SELECT * FROM idempotency_ledger WHERE idempotency_key = ?",
-            (idempotency_key,),
-        ).fetchone()
+        if request_key:
+            row = self.conn.execute(
+                "SELECT * FROM idempotency_ledger WHERE idempotency_key = ? OR UPPER(request_key) = ?",
+                (idempotency_key, request_key.strip().upper()),
+            ).fetchone()
+        else:
+            row = self.conn.execute(
+                "SELECT * FROM idempotency_ledger WHERE idempotency_key = ?",
+                (idempotency_key,),
+            ).fetchone()
         return dict(row) if row else None
 
-    def record_return(self, order_id: str, return_id: str, idempotency_key: str) -> None:
+    def record_return(
+        self,
+        order_id: str,
+        return_id: str,
+        idempotency_key: str,
+        request_key: str,
+        refund_amount: float,
+    ) -> None:
         self.check_health()
         now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         with self.conn:
             self.conn.execute(
-                "UPDATE orders SET status = 'return_initiated', active_return_id = ? WHERE UPPER(order_id) = ?",
-                (return_id, order_id.upper()),
+                "UPDATE orders SET status = 'refunded', active_return_id = ?, request_key = ? WHERE UPPER(order_id) = ?",
+                (return_id, request_key, order_id.upper()),
             )
             self.conn.execute(
                 """
                 INSERT INTO idempotency_ledger (
-                    idempotency_key, reference_id, action, order_id, status, created_at
-                ) VALUES (?, ?, 'return', ?, 'return_initiated', ?)
+                    idempotency_key, request_key, reference_id, action, order_id, refund_amount, status, created_at
+                ) VALUES (?, ?, ?, 'return', ?, ?, 'refunded', ?)
                 """,
-                (idempotency_key, return_id, order_id.upper(), now_iso),
+                (idempotency_key, request_key, return_id, order_id.upper(), refund_amount, now_iso),
             )
 
-    def record_cancellation(self, order_id: str, cancel_id: str, idempotency_key: str) -> None:
+    def record_cancellation(
+        self,
+        order_id: str,
+        cancel_id: str,
+        idempotency_key: str,
+        request_key: str,
+        refund_amount: float,
+    ) -> None:
         self.check_health()
         now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         with self.conn:
             self.conn.execute(
-                "UPDATE orders SET status = 'cancelled', cancellation_id = ? WHERE UPPER(order_id) = ?",
-                (cancel_id, order_id.upper()),
+                "UPDATE orders SET status = 'cancelled', cancellation_id = ?, request_key = ? WHERE UPPER(order_id) = ?",
+                (cancel_id, request_key, order_id.upper()),
             )
             self.conn.execute(
                 """
                 INSERT INTO idempotency_ledger (
-                    idempotency_key, reference_id, action, order_id, status, created_at
-                ) VALUES (?, ?, 'cancel', ?, 'cancelled', ?)
+                    idempotency_key, request_key, reference_id, action, order_id, refund_amount, status, created_at
+                ) VALUES (?, ?, ?, 'cancel', ?, ?, 'cancelled', ?)
                 """,
-                (idempotency_key, cancel_id, order_id.upper(), now_iso),
+                (idempotency_key, request_key, cancel_id, order_id.upper(), refund_amount, now_iso),
             )
 
     def record_escalation(self, ticket_dict: Dict[str, Any]) -> None:

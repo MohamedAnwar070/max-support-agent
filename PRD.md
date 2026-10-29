@@ -1,66 +1,64 @@
-# Product Requirements Document (PRD): Sunnystep Autonomous Customer Support Agent
+# Product Requirements Document (PRD): UrbanThread Autonomous Customer Support Agent
 
-**Document Owner:** AI Platform & Support Engineering  
+**Document Owner:** AI Engineering  
 **Status:** v1.0 Release  
-**Brand / Domain:** Sunnystep (Ergonomic Footwear & Apparel)
+**Brand / Domain:** UrbanThread Apparel Co. (100% Fictional Apparel Brand)
 
 ---
 
 ## 1. Executive Summary
-Sunnystep designs ergonomic walking shoes, recovery footwear, and movement apparel. Support volume centers on sizing/fit guidance, garment and shoe care, order tracking, returns, and pre-shipment cancellations. This document specifies the architecture, scope, safety boundaries, and evaluation framework for the **Sunnystep AI Customer Support Agent**.
+UrbanThread is a fictional direct-to-consumer apparel company offering everyday essentials such as the **Classic Cotton T-Shirt**, fleece hoodies, chinos, knitwear, and archive outerwear. This PRD defines the customer needs, scope, assumptions, hybrid SQLite architecture, and success criteria for the **UrbanThread AI Customer Support Agent**.
 
 ---
 
-## 2. Customer Needs & Problem Statement
+## 2. Customer Needs
 
-| Customer Segment | Core Need | Agent Capability |
+| Customer Need | Problem Solved | Agent Capability |
 |---|---|---|
-| **Prospective Buyer** | Accurate guidance on arch support, sizing fit, stock availability, care instructions, and Final Sale eligibility. | Real-time SQLite product catalog search (`lookup_products`) returning stock matrices, fit notes, and Final Sale flags. |
-| **Order Tracker** | Immediate visibility into fulfillment status, shipping carrier tracking, and delivery dates. | Authenticated SQLite order lookup (`get_order_status`) enforcing strict customer email ownership verification. |
-| **Return / Cancellation Requester** | Self-service return initiation for delivered items or immediate cancellation of unshipped orders. | Transactional return/cancellation processing (`process_return_or_cancel`) with SQLite `UNIQUE` idempotency keys. |
-| **Complex / Edge-Case Customer** | Transparent handling when store policies conflict or backend infrastructure fails, without hallucinated answers. | Deterministic conflict and fault detection that halts mutation and creates a structured human handoff (`escalate_to_human`). |
+| **Product & Sizing Inquiries** | Customers need instant answers on sizing, stock availability, fabric care, and Final Sale status (e.g., for the Classic Cotton T-Shirt). | SQLite catalog search (`lookup_products`) returning live size availability, fit guides, care instructions, and Final Sale flags. |
+| **Policy Clarification** | Customers want clear answers on the **7-day return & refund policy**, shipping speeds, cancellations, and loyalty perks. | Policy lookup (`lookup_policies`) grounded in official store rules (`POL-RET-01`, `POL-RET-02`, `POL-VIP-01`, `POL-CAN-01`, `POL-SHP-01`). |
+| **Order Status & Tracking** | Customers want real-time order status and tracking numbers without waiting in a support queue. | Authenticated order lookup (`get_order_status`) enforcing strict customer ownership verification before revealing any order details. |
+| **Self-Service Returns, Mock Refunds & Cancellations** | Customers want fast returns/refunds within the 7-day window or immediate cancellation of unshipped orders. | Transactional mock refund & return/cancellation execution (`process_return_or_cancel`) tracked by a **unique `request_key`** in SQLite. |
 
 ---
 
 ## 3. Scope
 
 ### 3.1 In-Scope
-1. **Product & Sizing Consultation:** Answering questions on SKU pricing, available sizes, ergonomic fit recommendations, care rules, and Final Sale status.
-2. **Policy Q&A:** Explaining the 30-day standard return policy (`POL-RET-01`), Clearance/Final Sale exclusions (`POL-RET-02`), VIP Gold loyalty benefits (`POL-VIP-01`), cancellation rules (`POL-CAN-01`), and shipping timelines (`POL-SHP-01`).
-3. **Authenticated Order Lookup:** Returning order state, line items, destination city, and tracking numbers only when `(order_id, customer_email)` matches the relational record.
-4. **Transactional Returns & Cancellations:**
-   - Creating returns (`RET-*`) for `delivered` orders within the eligible return window.
-   - Cancelling (`CAN-*`) orders in `processing` state prior to dispatch.
-   - Enforcing idempotency via SQLite `idempotency_ledger` to prevent duplicate RMAs or double refunds.
-5. **Missing Context Clarification:** Prompting the user when required identifiers (`order_id`, `customer_email`) are missing.
-6. **Human Specialist Escalation (`escalate_to_human`):** Generating structured tickets (`ESC-*`) when policies conflict, tools fail, or unsafe actions are requested.
+1. Answering product catalog questions (price, sizes in stock, fit, fabric care, Final Sale eligibility).
+2. Answering store policy questions (**7-day standard return window**, Final Sale exclusions, VIP Gold perks, shipping, cancellations).
+3. Authenticated order tracking (`order_id` + matching `customer_email`).
+4. Executing **mock refunds**, returns, and cancellations with a **unique `request_key`** and SQLite idempotency ledger so duplicate requests return the original action result without repeating the mutation.
+5. Asking targeted clarifications when required information is missing.
+6. Escalating to a human specialist (`escalate_to_human`) when policies conflict, tools fail, or unsafe actions are requested.
 
 ### 3.2 Out-of-Scope
-- Direct credit card re-billing, manual cash/wire transfers, or unverified goodwill payouts.
-- Modifying carrier routing after an order has entered `shipped` state.
-- Mutating customer identity records (`email`, `loyalty_tier`) through chat.
+- Live payment gateway mutations or external bank wire transfers.
+- Modifying carrier routing after an order has shipped.
+- Unauthenticated account profile modifications.
 
 ---
 
-## 4. Assumptions & Hybrid Architecture
+## 4. Assumptions & Technical Architecture
 
-1. **Hybrid SQLite + JSON Data Architecture:**
-   - Seed datasets live in version-controlled JSON (`data/*.json`) and are automatically loaded into a relational **SQLite database** (`data/sunnystep.db`) with normalized tables (`products`, `policies`, `policy_conflicts`, `customers`, `orders`, `order_items`, `idempotency_ledger`, `escalations`).
-2. **Multi-Backend LLM Engine:**
-   - Supports **OpenAI API** (`OPENAI_API_KEY`), **Claude Code Pro CLI** (`claude -p` using local Pro authentication), and a **Hybrid Deterministic Engine** controlled via `.env` (`src/config.py`).
-3. **Centralized Constants & Configuration:**
-   - All prompts, regex patterns, decision enums, error codes, and tool schemas are centralized in `src/constants.py` and `src/config.py`.
+1. **100% Fictional Data (`data/`):** All products (such as the `Classic Cotton T-Shirt`), policies, customers, and orders are synthetic.
+2. **Hybrid SQLite + JSON Persistence (`src/data_store.py`):**
+   - Version-controlled JSON seed files (`data/*.json`) automatically populate a relational **SQLite database** (`data/urbanthread.db`) with normalized tables (`products`, `policies`, `policy_conflicts`, `customers`, `orders`, `order_items`, `idempotency_ledger`, `escalations`).
+   - Every mock refund / return / cancellation is recorded with a **unique `request_key`** in `idempotency_ledger` inside an ACID transaction.
+3. **Centralized Constants & `.env` Configuration (`src/constants.py`, `src/config.py`):**
+   - All constants, prompts, regexes, SQLite schemas, and status codes are centralized in `src/constants.py`, with `.env` configuration managed in `src/config.py`.
+4. **Multi-Backend LLM Support (`src/llm_backends.py`):**
+   - Supports **Claude Code Pro CLI** (`claude -p`), **OpenAI API** (`OPENAI_API_KEY`), and a **Hybrid Deterministic Mode** for instant offline test/eval reproducibility.
 
 ---
 
-## 5. Success Criteria
+## 5. Success Criteria & Required Failure Mode Behaviors
 
-| Failure Mode / Metric | Requirement | Target |
+| Failure Case | Expected Behavior | Success Criterion |
 |---|---|---|
-| **1. Missing Information** | Request missing `order_id` and `email` before invoking order tools. | **100% Pass** |
-| **2. Conflicting Policies** | Detect conflict between `POL-RET-02` (Final Sale) and `POL-VIP-01` (VIP Gold) and escalate to human. | **100% Pass** |
-| **3. Unauthorised Order Access** | Block cross-customer order queries with zero PII leakage. | **100% Block Rate** |
-| **4. Prompt Injection** | Block instruction overrides, developer mode jailbreaks, and data exfiltration pre-tool execution. | **100% Block Rate** |
-| **5. Tool Failure** | Gracefully catch SQLite/DB `503` outages without hallucinating data and escalate to human. | **100% Pass** |
-| **6. Duplicate Requests** | Enforce SQLite idempotency ledger on repeated return/cancellation calls. | **100% Pass** |
-| **Repeatable Evaluation Suite** | End-to-end automated grading across 12 scenarios (`evals/run_evals.py`). | **100% Pass (12/12)** |
+| **1. Missing information** | Ask a targeted clarification | 100% of incomplete order/refund requests ask for the exact missing field (`Order ID` / `email`) without calling mutation tools. |
+| **2. Conflicting policies** | Escalate without guessing | 100% of `VIP_GOLD` Final Sale return requests (`POL-RET-02` vs. `POL-VIP-01`) escalate to human support without approving or denying. |
+| **3. Unauthorized order access** | Deny access without exposing order details | 100% of cross-customer order queries are denied with zero leaked PII, items, city, or tracking numbers. |
+| **4. Prompt injection** | Ignore instructions that attempt to override system rules | 100% of jailbreak/override attempts are rejected pre-tool execution without leaking system rules or customer data. |
+| **5. Tool failure** | Report that the action could not be verified; don't claim success | 100% of simulated SQLite `503` outages report that the action could not be verified, never claim success, and escalate to human support. |
+| **6. Duplicate request** | Return the original action result without repeating the action | 100% of repeated requests with an existing `request_key` / order action return the original refund/return result without double-processing. |
